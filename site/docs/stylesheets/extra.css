@@ -1,0 +1,196 @@
+/* NXpose Documentation — Technical Precision */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ============================================
+   COLOR SYSTEM
+   ============================================ */
+
+:root {
+  --md-primary-fg-color: #1E3A5F;
+  --md-primary-fg-color--light: #3B82F6;
+  --md-primary-fg-color--dark: #0F172A;
+  --md-accent-fg-color: #3B82F6;
+  --md-code-font: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #FAFBFC;
+  --md-code-bg-color: #F1F5F9;
+  --nx-code-border: #E2E8F0;
+  --nx-table-header-bg: #F1F5F9;
+  --nx-table-border: #E2E8F0;
+  --nx-table-stripe: #F8FAFC;
+  --nx-hr-color: #E2E8F0;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0F172A;
+  --md-default-fg-color: #E2E8F0;
+  --md-default-fg-color--light: #94A3B8;
+  --md-code-bg-color: #1E293B;
+  --md-primary-fg-color: #60A5FA;
+  --md-accent-fg-color: #60A5FA;
+  --nx-code-border: #334155;
+  --nx-table-header-bg: #1E293B;
+  --nx-table-border: #334155;
+  --nx-table-stripe: rgba(255, 255, 255, 0.02);
+  --nx-hr-color: #1E293B;
+}
+
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 2.4em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--nx-hr-color);
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset {
+  line-height: 1.7;
+}
+
+.md-typeset hr {
+  border-color: var(--nx-hr-color);
+}
+
+/* ============================================
+   CODE BLOCKS
+   ============================================ */
+
+.md-typeset code {
+  font-family: var(--md-code-font);
+  font-size: 0.82em;
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+}
+
+.md-typeset pre {
+  border-radius: 6px;
+  border-left: 3px solid var(--md-accent-fg-color);
+  border: 1px solid var(--nx-code-border);
+  border-left: 3px solid var(--md-accent-fg-color);
+}
+
+.md-typeset pre > code {
+  font-size: 0.82em;
+  line-height: 1.65;
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+
+.md-typeset table:not([class]) {
+  border: 1px solid var(--nx-table-border);
+  border-radius: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 0.85em;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--nx-table-header-bg);
+  font-weight: 600;
+  padding: 0.75em 1em;
+  border-bottom: 1px solid var(--nx-table-border);
+  text-align: left;
+}
+
+.md-typeset table:not([class]) td {
+  padding: 0.65em 1em;
+  border-bottom: 1px solid var(--nx-table-border);
+}
+
+.md-typeset table:not([class]) tr:last-child td {
+  border-bottom: none;
+}
+
+.md-typeset table:not([class]) tr:nth-child(even) td {
+  background-color: var(--nx-table-stripe);
+}
+
+/* ============================================
+   ADMONITIONS
+   ============================================ */
+
+.md-typeset .admonition {
+  border-radius: 6px;
+  border-width: 0;
+  border-left: 3px solid;
+  box-shadow: none;
+}
+
+/* ============================================
+   NAVIGATION & LAYOUT
+   ============================================ */
+
+/* Logo */
+.md-header__button.md-logo img {
+  height: 28px;
+  width: auto;
+}
+
+/* Sidebar TOC */
+.md-nav--secondary .md-nav__title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Content area max width */
+.md-content {
+  max-width: 52rem;
+}
+
+/* Footer */
+.md-footer-meta {
+  font-size: 0.8em;
+}
+
+/* ============================================
+   BULLET LISTS (first section)
+   ============================================ */
+
+.md-typeset ul {
+  margin-left: 0;
+}
+
+.md-typeset li {
+  margin-bottom: 0.15em;
+}
+
+/* ============================================
+   LINKS
+   ============================================ */
+
+.md-typeset a {
+  text-decoration: none;
+}
+
+.md-typeset a:hover {
+  text-decoration: underline;
+}
+
+/* ============================================
+   TABS (content tabs)
+   ============================================ */
+
+.md-typeset .tabbed-labels > label {
+  font-weight: 600;
+  font-size: 0.85em;
+}

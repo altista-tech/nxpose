@@ -1,0 +1,394 @@
+name: Build and Package nxpose
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Gate on test workflow passing: require tests to succeed before building
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Run tests first - all build jobs depend on this
+  tests:
+    name: Run Tests
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: write
+
+  build-deb:
+    name: Build DEB (${{ matrix.arch }})
+    needs: tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          check-latest: true
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Create systemd service file
+        run: |
+          cat > nxpose.service << 'SERVICEEOF'
+          [Unit]
+          Description=nxpose tunneling server
+          After=network.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          Type=simple
+          Restart=always
+          RestartSec=1
+          User=nxpose
+          Group=nxpose
+          ExecStart=/opt/nxpose/nxpose-server --config /etc/nxpose/server-config.yaml
+          WorkingDirectory=/opt/nxpose
+          Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          Environment="GODEBUG=netdns=go"
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICEEOF
+
+      - name: Set version
+        id: set-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            VERSION="1.0.0~dev.${TIMESTAMP}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build DEB package
+        run: |
+          sed -i "s/VERSION := 1.0.0/VERSION := ${{ steps.set-version.outputs.version }}/" Makefile
+          make ARCH=${{ matrix.arch }} PACKAGE_FORMAT=deb
+          ls -la nxpose*.deb
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-${{ matrix.arch }}-deb
+          path: nxpose*.deb
+          retention-days: 7
+
+  build-rpm:
+    name: Build RPM (${{ matrix.arch }})
+    needs: tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          check-latest: true
+
+      - name: Install RPM build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential rpm
+
+      - name: Create systemd service file
+        run: |
+          cat > nxpose.service << 'SERVICEEOF'
+          [Unit]
+          Description=nxpose tunneling server
+          After=network.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          Type=simple
+          Restart=always
+          RestartSec=1
+          User=nxpose
+          Group=nxpose
+          ExecStart=/opt/nxpose/nxpose-server --config /etc/nxpose/server-config.yaml
+          WorkingDirectory=/opt/nxpose
+          Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          Environment="GODEBUG=netdns=go"
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICEEOF
+
+      - name: Set version
+        id: set-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            VERSION="1.0.0~dev.${TIMESTAMP}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build RPM package
+        run: |
+          sed -i "s/VERSION := 1.0.0/VERSION := ${{ steps.set-version.outputs.version }}/" Makefile
+          make ARCH=${{ matrix.arch }} PACKAGE_FORMAT=rpm
+          ls -la nxpose*.rpm
+
+      - name: Verify RPM contains systemd service
+        run: |
+          rpm -qlp nxpose*.rpm | grep -q "systemd/system/nxpose.service" && echo "RPM contains systemd service file" || (echo "ERROR: RPM missing systemd service file" && exit 1)
+          rpm -qlp nxpose*.rpm | grep -q "opt/nxpose/nxpose-server" && echo "RPM contains server binary" || (echo "ERROR: RPM missing server binary" && exit 1)
+          rpm -qlp nxpose*.rpm | grep -q "etc/nxpose/server-config.yaml" && echo "RPM contains config file" || (echo "ERROR: RPM missing config file" && exit 1)
+          echo "RPM package verification passed - installs server as a systemd service"
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-${{ matrix.arch }}-rpm
+          path: nxpose*.rpm
+          retention-days: 7
+
+  build-macos-pkg:
+    name: Build macOS PKG (${{ matrix.arch }})
+    needs: tests
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          check-latest: true
+
+      - name: Set version
+        id: set-version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            VERSION="1.0.0~dev.${TIMESTAMP}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build macOS PKG
+        run: |
+          sed -i '' "s/VERSION := 1.0.0/VERSION := ${{ steps.set-version.outputs.version }}/" Makefile
+          make ARCH=${{ matrix.arch }}
+          ls -la nxpose*.pkg
+
+      - name: Upload PKG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-${{ matrix.arch }}-pkg
+          path: nxpose*.pkg
+          retention-days: 7
+
+  build-client-binaries:
+    name: Build Client Binaries
+    needs: tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          check-latest: true
+
+      - name: Build all client binaries
+        run: make build-clients
+
+      - name: Upload client binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-client-binaries
+          path: dist/nxpose-*
+          retention-days: 7
+
+  release:
+    name: Create GitHub Release
+    needs: [build-deb, build-rpm, build-macos-pkg, build-client-binaries]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize release assets
+        run: |
+          mkdir -p release-assets
+          find release-artifacts -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.pkg" -o -name "nxpose-*" \) -exec cp {} release-assets/ \;
+          echo "Release assets:"
+          ls -la release-assets/
+
+      - name: Create tarballs for Homebrew
+        run: |
+          cd release-assets
+          for binary in nxpose-darwin-amd64 nxpose-darwin-arm64; do
+            if [ -f "$binary" ]; then
+              mkdir -p tmp
+              cp "$binary" tmp/nxpose
+              tar -czf "${binary}.tar.gz" -C tmp nxpose
+              rm -rf tmp
+            fi
+          done
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-site:
+    name: Deploy Documentation Site
+    needs: tests
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment package
+        run: |
+          mkdir -p staging
+          cp deploy/site/Dockerfile staging/
+          cp deploy/site/docker-compose.yml staging/
+          cp -r site staging/
+
+      - name: Clean old site on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            rm -rf /opt/nxpose.mpanin.me/site
+            mkdir -p /opt/nxpose.mpanin.me
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          source: "staging/Dockerfile,staging/docker-compose.yml,staging/site"
+          target: /opt/nxpose.mpanin.me
+          strip_components: 1
+
+      - name: Build and start container
+        uses: appleboy/ssh-action@v1
+        with:
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /opt/nxpose.mpanin.me
+            docker compose up -d --build
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download macOS tarballs
+        run: |
+          gh release download "v${{ steps.version.outputs.version }}" \
+            --repo ${{ github.repository }} \
+            --pattern "nxpose-darwin-*.tar.gz" \
+            --dir ./dl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute SHA256 and update formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          SHA_ARM64=$(sha256sum dl/nxpose-darwin-arm64.tar.gz | awk '{print $1}')
+          SHA_AMD64=$(sha256sum dl/nxpose-darwin-amd64.tar.gz | awk '{print $1}')
+          REPO=${{ github.repository }}
+
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/nxrvl/homebrew-tap.git tap
+          mkdir -p tap/Formula
+
+          cat > tap/Formula/nxpose.rb << FORMULA_EOF
+          class Nxpose < Formula
+            desc "Secure tunneling client - expose local services to the internet"
+            homepage "https://nxpose.mpanin.me"
+            license "MIT"
+            version "${VERSION}"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/nxpose-darwin-arm64.tar.gz"
+                sha256 "${SHA_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/nxpose-darwin-amd64.tar.gz"
+                sha256 "${SHA_AMD64}"
+              end
+            end
+
+            def install
+              bin.install "nxpose"
+            end
+
+            test do
+              assert_match "nxpose", shell_output("#{bin}/nxpose --help")
+            end
+          end
+          FORMULA_EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/nxpose.rb
+          git commit -m "Update nxpose to ${VERSION}"
+          git push
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

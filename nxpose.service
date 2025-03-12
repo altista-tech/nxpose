@@ -1,0 +1,18 @@
+[Unit]
+Description=nxpose tunneling server
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=nxpose
+Group=nxpose
+ExecStart=/opt/nxpose/nxpose-server --config /etc/nxpose/server-config.yaml
+WorkingDirectory=/opt/nxpose
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="GODEBUG=netdns=go"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+.idea/
+.env
+.vscode/
+.DS_Store
+vendor/
+
+# Build artifacts
+/client
+/server
+/dist/
+/build/
+*.deb
+*.rpm
+*.pkg
+
+# AI tools
+CLAUDE.md
+.claude/
+.ralphex/
+.dlcatignore
+.serena/
+
+# Internal docs/plans
+docs/
+
+# Local dev files
+Dockerfile.docs
+Dockerfile.site
+docker-compose.site.yml
+
+# Site build cache
+site/.cache/
+
+# Test artifacts
+coverage.out
+coverage.html
