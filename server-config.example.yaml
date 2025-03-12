@@ -1,0 +1,77 @@
+# nxpose Server Configuration
+
+# Server settings
+server:
+	# Address to bind the server to
+	# Use 0.0.0.0 to bind to all interfaces
+	bind_address: "0.0.0.0"
+
+	# Port for the HTTPS API server
+	# This is used for client registration, tunnel management, and WebSocket connections
+	port: 8443
+
+	# Base domain for tunnels
+	# This domain should be configured in your DNS to point to this server
+	# All subdomain tunnels will be created under this domain
+	domain: "nxpose.example.com"
+
+# TLS settings
+tls:
+	# Path to TLS certificate file
+	# If not specified, a self-signed certificate will be generated
+	cert: "/etc/nxpose/certs/server.crt"
+
+	# Path to TLS key file
+	# If not specified, a self-signed key will be generated
+	key: "/etc/nxpose/certs/server.key"
+
+	# Minimum TLS version (optional)
+	# min_version: "1.2"
+
+	# Preferred cipher suites (optional)
+	# cipher_suites:
+	#   - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+	#   - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+
+# Tunnel settings
+tunnels:
+	# Maximum number of tunnels per client
+	max_per_client: 5
+
+	# Tunnel expiration time in hours (default: 24)
+	expiration_hours: 24
+
+	# Automatically clean up inactive tunnels after this many minutes
+	inactive_timeout_mins: 60
+
+	# TCP port range for TCP tunnels
+	tcp_port_min: 10000
+	tcp_port_max: 20000
+
+# Logging settings
+logging:
+	# Log level (debug, info, warn, error)
+	level: "info"
+
+	# Log format (text, json)
+	format: "text"
+
+	# Log file (if not specified, logs to stdout)
+	# file: "/var/log/nxpose/server.log"
+
+# Enable verbose output for debugging
+verbose: false
+
+# Access control settings
+access_control:
+	# Enable authentication for clients (recommended for production)
+	require_auth: true
+
+	# Allow registration of new clients
+	allow_registration: true
+
+	# Allowed client sources (IP ranges in CIDR notation)
+	# If empty, all sources are allowed
+	allowed_sources:
+		- "0.0.0.0/0"  # Allow all IPs (default)
+		# - "192.168.1.0/24"  # Example: Allow only local network
