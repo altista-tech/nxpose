@@ -215,6 +215,15 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 	fmt.Printf("Tunnel created with ID: %s\n", tunnelResp.TunnelID)
 	fmt.Printf("Public URL: %s\n", tunnelResp.PublicURL)
 
+	// Ensure that HTTPS protocol request results in HTTPS URL
+	if protocol == "https" && !strings.HasPrefix(tunnelResp.PublicURL, "https://") {
+		originalURL := tunnelResp.PublicURL
+		// Replace the protocol part
+		tunnelResp.PublicURL = "https://" + strings.TrimPrefix(strings.TrimPrefix(originalURL, "http://"), "https://")
+		fmt.Printf("Upgraded URL to HTTPS: %s\n", tunnelResp.PublicURL)
+		log.Infof("Protocol requested was HTTPS but server returned HTTP URL. Upgraded to: %s", tunnelResp.PublicURL)
+	}
+
 	// Return both public URL and tunnel ID
 	return tunnelResp.PublicURL, tunnelResp.TunnelID, nil
 }

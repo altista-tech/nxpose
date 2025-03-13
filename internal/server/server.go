@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"nxpose/internal/crypto"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -265,13 +266,14 @@ func (s *Server) initCertificateManager(ctx context.Context) error {
 		return nil
 	}
 
+	s.log.Info("Initializing Let's Encrypt certificate manager...")
+
 	// Validate required configuration
 	if s.config.LetsEncrypt.Email == "" {
 		return fmt.Errorf("Let's Encrypt email address is required")
 	}
 
 	// Set up domains to request certificates for
-	// Important: Order matters here. Request the wildcard first, then the base domain
 	domains := []string{
 		"*." + s.config.BaseDomain, // Wildcard certificate
 		s.config.BaseDomain,        // Base domain certificate
@@ -279,55 +281,109 @@ func (s *Server) initCertificateManager(ctx context.Context) error {
 
 	s.log.Infof("Requesting certificates for domains: %v", domains)
 
-	// Create HTTP server for ACME challenges on port 80 (if needed for HTTP validation)
+	// Determine storage directory
+	storageDir := s.config.LetsEncrypt.StorageDir
+	if storageDir == "" {
+		// Use default location in home directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		storageDir = filepath.Join(homeDir, ".nxpose", "certificates")
+		s.log.Infof("Using default certificate storage directory: %s", storageDir)
+	}
+
+	// Ensure the storage directory exists
+	if err := os.MkdirAll(storageDir, 0700); err != nil {
+		return fmt.Errorf("failed to create certificate storage directory: %w", err)
+	}
+
+	// Check directory permissions
+	s.log.Debugf("Checking permissions on certificate storage directory: %s", storageDir)
+	info, err := os.Stat(storageDir)
+	if err != nil {
+		s.log.Warnf("Failed to stat certificate storage directory: %v", err)
+	} else {
+		s.log.Debugf("Directory permissions: %v", info.Mode())
+		if info.Mode().Perm()&0700 != 0700 {
+			s.log.Warnf("Certificate directory has insufficient permissions. Setting to 0700")
+			os.Chmod(storageDir, 0700)
+		}
+	}
+
+	// Create HTTP server for ACME challenges on port 80
 	acmeMux := http.NewServeMux()
 	s.acmeHTTPServer = &http.Server{
 		Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
 		Handler: acmeMux,
 	}
 
-	// Configure DNS provider for DNS-01 challenges if specified
-	if s.config.LetsEncrypt.DNSProvider != "" {
-		s.log.Infof("Using DNS provider: %s for ACME DNS-01 challenges", s.config.LetsEncrypt.DNSProvider)
+	// Check for DNS provider configuration
+	hasDNSProvider := s.config.LetsEncrypt.DNSProvider != ""
+	if !hasDNSProvider {
+		s.log.Error("No DNS provider configured. Wildcard certificates REQUIRE DNS-01 challenge")
+		s.log.Error("Please configure a DNS provider in your server-config.yaml file")
+		s.log.Error("Example: letsencrypt.dns.provider: 'cloudflare'")
+		s.log.Error("         letsencrypt.dns.credentials.api_token: 'your-token'")
+		return fmt.Errorf("wildcard certificates require DNS-01 challenge provider")
+	}
 
-		// Ensure environment variables are populated if credentials use env vars
-		for key, value := range s.config.LetsEncrypt.DNSCredentials {
-			if strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}") {
-				envVar := strings.TrimSuffix(strings.TrimPrefix(value, "${"), "}")
-				envValue := os.Getenv(envVar)
-				if envValue == "" {
-					s.log.Warnf("Environment variable %s not found or empty", envVar)
-				} else {
-					s.config.LetsEncrypt.DNSCredentials[key] = envValue
-				}
+	s.log.Infof("Using DNS provider: %s for ACME DNS-01 challenges", s.config.LetsEncrypt.DNSProvider)
+
+	// Ensure environment variables are populated if credentials use env vars
+	for key, value := range s.config.LetsEncrypt.DNSCredentials {
+		if strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}") {
+			envVar := strings.TrimSuffix(strings.TrimPrefix(value, "${"), "}")
+			envValue := os.Getenv(envVar)
+			if envValue == "" {
+				s.log.Warnf("Environment variable %s not found or empty", envVar)
+			} else {
+				s.config.LetsEncrypt.DNSCredentials[key] = envValue
+				s.log.Debugf("Using environment variable for %s", key)
 			}
 		}
-	} else {
-		s.log.Info("No DNS provider specified, using HTTP-01 challenge")
-		s.log.Warn("HTTP-01 challenge cannot issue wildcard certificates, consider using DNS-01")
 	}
+
+	// Check if the DNS credentials are configured
+	if len(s.config.LetsEncrypt.DNSCredentials) == 0 {
+		s.log.Error("DNS provider selected but no credentials provided")
+		s.log.Error("Please add DNS credentials to your server-config.yaml")
+		return fmt.Errorf("DNS provider credentials are required")
+	}
+
+	// Define ACME environment directory
+	acmeEnvStr := "production"
+	acmeEnv := crypto.ProductionEnv
+	if s.config.LetsEncrypt.Environment == crypto.StagingEnv {
+		acmeEnvStr = "staging"
+		acmeEnv = crypto.StagingEnv
+	}
+	s.log.Infof("Using Let's Encrypt %s environment", acmeEnvStr)
 
 	// Create certificate manager config
 	cmConfig := crypto.CertificateManagerConfig{
-		Email:       s.config.LetsEncrypt.Email,
-		Domains:     domains,
-		Environment: s.config.LetsEncrypt.Environment,
-		StorageDir:  s.config.LetsEncrypt.StorageDir,
-		HTTPServer:  s.acmeHTTPServer,
-		Logger:      s.log.Logger,
-		// Add DNS configuration
+		Email:          s.config.LetsEncrypt.Email,
+		Domains:        domains,
+		Environment:    acmeEnv,
+		StorageDir:     storageDir,
+		HTTPServer:     s.acmeHTTPServer,
+		Logger:         s.log.Logger,
 		DNSProvider:    s.config.LetsEncrypt.DNSProvider,
 		DNSCredentials: s.config.LetsEncrypt.DNSCredentials,
 	}
 
 	// Create certificate manager
+	s.log.Debug("Creating certificate manager")
 	certManager, err := crypto.NewCertificateManager(cmConfig)
 	if err != nil {
+		s.log.Errorf("Failed to create certificate manager: %v", err)
 		return fmt.Errorf("failed to create certificate manager: %w", err)
 	}
 
 	// Start certificate manager
+	s.log.Info("Starting certificate manager to obtain/renew certificates...")
 	if err := certManager.Start(ctx); err != nil {
+		s.log.Errorf("Failed to start certificate manager: %v", err)
 		return fmt.Errorf("failed to start certificate manager: %w", err)
 	}
 
@@ -338,6 +394,28 @@ func (s *Server) initCertificateManager(ctx context.Context) error {
 	s.tlsConfig = certManager.GetTLSConfig()
 
 	s.log.Info("Certificate manager initialized successfully")
+
+	// Log certificate status
+	status := certManager.Status()
+	if certs, ok := status["certificates"].(map[string]interface{}); ok {
+		for domain, certInfo := range certs {
+			if info, ok := certInfo.(map[string]interface{}); ok {
+				if errMsg, hasError := info["error"]; hasError {
+					s.log.Warnf("Certificate for %s: Error - %s", domain, errMsg)
+				} else {
+					issuer := info["issuer"]
+					notAfter, ok := info["notAfter"].(time.Time)
+					if ok {
+						s.log.Infof("Certificate for %s: Issuer: %v, Valid until: %s",
+							domain, issuer, notAfter.Format("2006-01-02 15:04:05"))
+					} else {
+						s.log.Infof("Certificate for %s: Issuer: %v", domain, issuer)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -603,20 +681,39 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	s.tunnels.tunnels[tunnelID] = tunnel
 	s.tunnels.mu.Unlock()
 
-	// Construct public URL - now properly handling HTTP vs. HTTPS
+	// Check if HTTPS is available and requested
+	httpsAvailable := false
+
+	// HTTPS is available if Let's Encrypt is configured and active
+	if s.certificateManager != nil {
+		httpsAvailable = true
+		s.log.Debug("HTTPS is available via certificate manager")
+	} else if s.config.TLSCert != "" && s.config.TLSKey != "" {
+		httpsAvailable = true
+		s.log.Debug("HTTPS is available via static certificates")
+	}
+
+	// Construct public URL with proper protocol
 	var publicURL string
 	if reqBody.Protocol == "https" {
-		// Make sure we have Let's Encrypt configured or certs available
-		if s.certificateManager != nil || (s.config.TLSCert != "" && s.config.TLSKey != "") {
+		if httpsAvailable {
 			publicURL = fmt.Sprintf("https://%s.%s", subdomain, s.config.BaseDomain)
+			s.log.Infof("Created HTTPS tunnel: %s", publicURL)
 		} else {
-			// Fall back to HTTP if we don't have HTTPS capabilities
-			s.log.Warn("HTTPS requested but no certificates available, falling back to HTTP")
+			// Fall back to HTTP if HTTPS was requested but not available
 			publicURL = fmt.Sprintf("http://%s.%s", subdomain, s.config.BaseDomain)
+			s.log.Warnf("HTTPS requested but certificates not available, falling back to HTTP: %s", publicURL)
 			tunnel.Protocol = "http" // Update the protocol in the stored tunnel
 		}
 	} else {
 		publicURL = fmt.Sprintf("%s://%s.%s", reqBody.Protocol, subdomain, s.config.BaseDomain)
+		s.log.Infof("Created %s tunnel: %s", reqBody.Protocol, publicURL)
+	}
+
+	// Add port to URL if non-standard
+	if (reqBody.Protocol == "http" && s.config.Port != 80) ||
+		(reqBody.Protocol == "https" && s.config.Port != 443) {
+		publicURL = fmt.Sprintf("%s:%d", publicURL, s.config.Port)
 	}
 
 	// Create response

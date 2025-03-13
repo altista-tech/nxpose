@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +58,21 @@ func NewCertificateManager(config CertificateManagerConfig) (*CertificateManager
 		config.Logger = logrus.New()
 	}
 
+	// If storage directory is not set, use default in user's home directory
+	if config.StorageDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		config.StorageDir = filepath.Join(homeDir, ".nxpose", "certificates")
+		config.Logger.Infof("Using default certificate storage directory: %s", config.StorageDir)
+	}
+
+	// Ensure the storage directory exists
+	if err := os.MkdirAll(config.StorageDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create certificate storage directory: %w", err)
+	}
+
 	// Set up storage
 	storage := &certmagic.FileStorage{Path: config.StorageDir}
 
@@ -105,6 +122,11 @@ func NewCertificateManager(config CertificateManagerConfig) (*CertificateManager
 func (cm *CertificateManager) Start(ctx context.Context) error {
 	cm.logger.Info("Starting certificate manager")
 
+	// Ensure the storage directory exists before attempting to use it
+	if err := os.MkdirAll(cm.config.StorageDir, 0700); err != nil {
+		return fmt.Errorf("failed to create certificate storage directory: %w", err)
+	}
+
 	// If we have a custom HTTP server for challenges
 	if cm.config.HTTPServer != nil {
 		// Setup HTTP challenge parameters
@@ -129,13 +151,40 @@ func (cm *CertificateManager) Start(ctx context.Context) error {
 		cm.acmeIssuer.AltTLSALPNPort = 0 // Disable TLS-ALPN if using HTTP
 	}
 
-	// Manage certificates for all the domains
-	err := cm.certmagic.ManageSync(ctx, cm.config.Domains)
-	if err != nil {
-		return fmt.Errorf("failed to manage certificates: %w", err)
+	// Check if we already have valid certificates for all domains
+	needsNewCerts := false
+	for _, domain := range cm.config.Domains {
+		// Try to load existing certificate
+		cert, err := cm.certmagic.CacheManagedCertificate(ctx, domain)
+
+		if err != nil || cert.Leaf == nil || time.Until(cert.Leaf.NotAfter) < 30*24*time.Hour {
+			// Certificate doesn't exist, is invalid, or expires soon
+			cm.logger.Infof("Certificate for domain %s needs to be obtained/renewed", domain)
+			needsNewCerts = true
+			break
+		} else {
+			cm.logger.Infof("Found valid certificate for domain %s (expires: %s)",
+				domain, cert.Leaf.NotAfter.Format("2006-01-02 15:04:05"))
+		}
 	}
 
-	cm.logger.Info("Certificate manager started")
+	if needsNewCerts {
+		cm.logger.Info("Obtaining certificates for domains")
+		// Manage certificates for all the domains
+		err := cm.certmagic.ManageSync(ctx, cm.config.Domains)
+		if err != nil {
+			return fmt.Errorf("failed to obtain certificates: %w", err)
+		}
+	} else {
+		cm.logger.Info("All certificates are valid, no need to obtain new certificates")
+		// Still need to load certificates for use
+		err := cm.certmagic.ManageAsync(ctx, cm.config.Domains)
+		if err != nil {
+			return fmt.Errorf("failed to load existing certificates: %w", err)
+		}
+	}
+
+	cm.logger.Info("Certificate manager started successfully")
 	return nil
 }
 
@@ -167,8 +216,7 @@ func (cm *CertificateManager) Status() map[string]interface{} {
 			continue
 		}
 
-		// The new certmagic API doesn't expose a direct way to check if a certificate
-		// is temporary, so we'll infer it based on the certificate's properties
+		// Check if certificate is temporary
 		isTemp := false
 		// Temporary certs usually have a very short lifetime (a few days)
 		if time.Until(cert.Leaf.NotAfter) < 7*24*time.Hour {
@@ -187,6 +235,7 @@ func (cm *CertificateManager) Status() map[string]interface{} {
 	status["certificates"] = certificates
 	status["environment"] = cm.config.Environment
 	status["email"] = cm.config.Email
+	status["storage_dir"] = cm.config.StorageDir
 
 	return status
 }
