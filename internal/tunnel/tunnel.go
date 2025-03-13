@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -78,6 +80,12 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 		return "", "", fmt.Errorf("no certificate data available, please run 'nxpose register' first")
 	}
 
+	// Create logger for diagnostics
+	log := logrus.New()
+	if os.Getenv("NXPOSE_DEBUG") == "1" {
+		log.SetLevel(logrus.DebugLevel)
+	}
+
 	// Create tunnel request
 	clientID := uuid.New().String()
 	req := struct {
@@ -102,6 +110,7 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 	serverURL := fmt.Sprintf("https://%s:%d/api/tunnel", serverHost, serverPort)
 
 	fmt.Printf("Sending tunnel request to %s\n", serverURL)
+	log.Debugf("Request body: %s", string(reqBody))
 
 	// Create HTTP request
 	httpReq, err := http.NewRequest("POST", serverURL, bytes.NewBuffer(reqBody))
@@ -109,19 +118,58 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 		return "", "", fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "nxpose-client/1.0")
 
-	// Create HTTP client with proper TLS configuration
+	// Create HTTP client with proper TLS configuration and longer timeout
 	client := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true, // Only for development - should use proper certificates in production
 			},
+			DisableKeepAlives:   false,
+			MaxIdleConnsPerHost: 10,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     30 * time.Second,
 		},
-		Timeout: 15 * time.Second, // Increased timeout
+		Timeout: 30 * time.Second, // Increased timeout
 	}
 
-	// Send request
-	resp, err := client.Do(httpReq)
+	// Add retries for better resilience
+	maxRetries := 3
+	var resp *http.Response
+	var respBody []byte
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Send request
+		resp, err = client.Do(httpReq)
+		if err == nil {
+			// Read response
+			respBody, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if err == nil {
+				break // Success, exit retry loop
+			}
+
+			log.Warnf("Failed to read response body (attempt %d/%d): %v", attempt, maxRetries, err)
+		} else {
+			log.Warnf("Failed to send request (attempt %d/%d): %v", attempt, maxRetries, err)
+		}
+
+		if attempt < maxRetries {
+			// Wait before retrying with exponential backoff
+			backoff := time.Duration(attempt*attempt) * time.Second
+			log.Infof("Retrying in %v...", backoff)
+			time.Sleep(backoff)
+
+			// Create a fresh request for retry
+			httpReq, _ = http.NewRequest("POST", serverURL, bytes.NewBuffer(reqBody))
+			httpReq.Header.Set("Content-Type", "application/json")
+			httpReq.Header.Set("User-Agent", "nxpose-client/1.0")
+		}
+	}
+
+	// Check if all retries failed
 	if err != nil {
 		// For development: if the real server is not available, simulate the response
 		if os.Getenv("NXPOSE_DEV_MODE") == "1" {
@@ -130,18 +178,12 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 			tunnelID := uuid.New().String()
 			return fmt.Sprintf("%s://%s.%s", protocol, subdomain, serverHost), tunnelID, nil
 		}
-		return "", "", fmt.Errorf("failed to send request to server: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read response: %w", err)
+		return "", "", fmt.Errorf("failed to send request to server after %d attempts: %w", maxRetries, err)
 	}
 
 	// Print raw response for debugging
 	fmt.Printf("Server response (status %d): %s\n", resp.StatusCode, string(respBody))
+	log.Debugf("Full response headers: %v", resp.Header)
 
 	// Check response status
 	if resp.StatusCode != http.StatusOK {
@@ -162,6 +204,11 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 	// Check success
 	if !tunnelResp.Success {
 		return "", "", fmt.Errorf("server returned error: %s", tunnelResp.Message)
+	}
+
+	// Validate response
+	if tunnelResp.TunnelID == "" || tunnelResp.PublicURL == "" {
+		return "", "", fmt.Errorf("server returned incomplete data: missing tunnel ID or public URL")
 	}
 
 	// Print additional debug info
@@ -188,8 +235,17 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 	// Subdomain is the first part
 	subdomain := hostParts[0]
 
-	// Server domain is the rest
+	// Server domain is the rest joined together
 	serverDomain := strings.Join(hostParts[1:], ".")
+
+	// Extract server port from URL if present, otherwise use default port
+	serverPort := 8443
+	if parsedURL.Port() != "" {
+		port, err := strconv.Atoi(parsedURL.Port())
+		if err == nil && port > 0 {
+			serverPort = port
+		}
+	}
 
 	fmt.Printf("Creating tunnel with ID: %s to URL: %s\n", tunnelID, publicURL)
 
@@ -201,7 +257,7 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 		PublicURL:  publicURL,
 		CertData:   certData,
 		ServerHost: serverDomain,
-		ServerPort: 8443,
+		ServerPort: serverPort,
 		stopCh:     make(chan struct{}),
 		log:        logrus.New(),
 	}
@@ -217,9 +273,67 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 		tunnel.log.SetLevel(logrus.InfoLevel)
 	}
 
-	// Start the tunnel
-	if err := tunnel.Start(); err != nil {
-		return err
+	// Verify local service is available before starting tunnel
+	localURL := fmt.Sprintf("http://localhost:%d", localPort)
+	localClient := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+
+	// Try a HEAD request first to minimize data transfer
+	req, _ := http.NewRequest("HEAD", localURL, nil)
+	resp, err := localClient.Do(req)
+	if err != nil {
+		// Try a GET request as fallback
+		req, _ = http.NewRequest("GET", localURL, nil)
+		resp, err = localClient.Do(req)
+
+		if err != nil {
+			tunnel.log.Warnf("Warning: Local service at %s doesn't appear to be running: %v", localURL, err)
+			fmt.Printf("Warning: Can't connect to local service at %s\n", localURL)
+			fmt.Println("Make sure your local service is running before starting the tunnel.")
+
+			// Ask user if they want to continue anyway
+			fmt.Print("Continue anyway? (y/n): ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) != "y" {
+				return fmt.Errorf("tunnel creation cancelled - please start your local service first")
+			}
+		} else {
+			resp.Body.Close()
+		}
+	} else {
+		resp.Body.Close()
+		tunnel.log.Infof("Local service verified at %s (status: %d)", localURL, resp.StatusCode)
+	}
+
+	// Start the tunnel with retry mechanism
+	maxRetries := 3
+	var startErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		startErr = tunnel.Start()
+		if startErr == nil {
+			break // Success
+		}
+
+		tunnel.log.WithError(startErr).Warnf("Failed to start tunnel (attempt %d/%d)", attempt, maxRetries)
+
+		if attempt < maxRetries {
+			// Wait before retrying with exponential backoff
+			backoff := time.Duration(attempt*attempt) * time.Second
+			fmt.Printf("Retrying in %v...\n", backoff)
+			time.Sleep(backoff)
+		}
+	}
+
+	if startErr != nil {
+		return fmt.Errorf("failed to start tunnel after %d attempts: %w", maxRetries, startErr)
 	}
 
 	// Print some status info
@@ -227,6 +341,7 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 		protocol, localPort, publicURL)
 	fmt.Printf("Subdomain: %s\n", subdomain)
 	fmt.Printf("Tunnel ID: %s\n", tunnelID)
+	fmt.Println("\nTunnel active. Press Ctrl+C to stop.")
 
 	// Monitor for interrupt signal
 	sigCh := make(chan os.Signal, 1)
@@ -237,7 +352,7 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 	case <-sigCh:
 		fmt.Println("\nShutting down tunnel...")
 	case <-tunnel.stopCh:
-		fmt.Println("Tunnel stopped")
+		fmt.Println("\nTunnel stopped")
 	}
 
 	// Stop the tunnel
@@ -315,23 +430,31 @@ func (t *Tunnel) Stop() error {
 
 // connectWebSocket establishes a WebSocket connection to the server
 func (t *Tunnel) connectWebSocket() error {
-	// Build WebSocket URL with tunnelID instead of just ID
+	// Build WebSocket URL including both client_id and tunnel_id parameters
 	wsURL := fmt.Sprintf("wss://%s:%d/api/ws?client_id=%s&tunnel_id=%s",
 		t.ServerHost, t.ServerPort, t.ID, t.ID)
 
-	// Create WebSocket config
-	config, err := websocket.NewConfig(wsURL, "https://"+t.ServerHost)
+	// Create WebSocket config with origin
+	origin := fmt.Sprintf("https://%s:%d", t.ServerHost, t.ServerPort)
+	config, err := websocket.NewConfig(wsURL, origin)
 	if err != nil {
 		return fmt.Errorf("failed to create WebSocket config: %w", err)
 	}
 
-	// Set up TLS config
+	// Set proper headers
+	config.Header.Add("User-Agent", "nxpose-client/1.0")
+	config.Header.Add("X-Nxpose-Client-ID", t.ID)
+	config.Header.Add("X-Nxpose-Tunnel-ID", t.ID)
+
+	// Configure TLS with insecure skip verify for development
 	config.TlsConfig = &tls.Config{
 		InsecureSkipVerify: true, // Only for development - should use proper certificates in production
 	}
 
-	// Dial WebSocket
+	// Log the connection attempt
 	t.log.Debugf("Connecting to WebSocket at %s", wsURL)
+
+	// Dial with the config (simpler approach)
 	wsConn, err := websocket.DialConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to dial WebSocket: %w", err)
@@ -339,46 +462,138 @@ func (t *Tunnel) connectWebSocket() error {
 
 	t.wsConn = wsConn
 	t.log.Info("WebSocket connection established")
+
+	// Start a heartbeat routine
+	go t.startHeartbeat()
+
 	return nil
 }
 
-func (t *Tunnel) registerTunnel() error {
-	// Wait for welcome message first
-	var welcomeMsg TunnelMessage
-	t.wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if err := websocket.JSON.Receive(t.wsConn, &welcomeMsg); err != nil {
-		return fmt.Errorf("failed to receive welcome message: %w", err)
+// Add this new function to implement heartbeat
+func (t *Tunnel) startHeartbeat() {
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Send ping message
+			ping := TunnelMessage{
+				Type:      "ping",
+				RequestID: uuid.New().String(),
+				TunnelID:  t.ID,
+				Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
+			}
+
+			t.mu.Lock()
+			if t.wsConn == nil {
+				t.mu.Unlock()
+				return
+			}
+
+			err := websocket.JSON.Send(t.wsConn, ping)
+			t.mu.Unlock()
+
+			if err != nil {
+				t.log.WithError(err).Warn("Failed to send heartbeat ping")
+				return
+			}
+
+			t.log.Debug("Sent heartbeat ping")
+		case <-t.stopCh:
+			return
+		}
 	}
+}
+
+func (t *Tunnel) registerTunnel() error {
+	// Create a channel to handle message timeouts
+	msgChan := make(chan TunnelMessage, 1)
+	errChan := make(chan error, 1)
+
+	// Start a goroutine to read the welcome message
+	go func() {
+		var welcomeMsg TunnelMessage
+		if err := websocket.JSON.Receive(t.wsConn, &welcomeMsg); err != nil {
+			errChan <- fmt.Errorf("failed to receive welcome message: %w", err)
+			return
+		}
+		msgChan <- welcomeMsg
+	}()
+
+	// Wait for the welcome message with timeout
+	var welcomeMsg TunnelMessage
+	select {
+	case err := <-errChan:
+		return err
+	case welcomeMsg = <-msgChan:
+		// Process welcome message
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("timeout waiting for welcome message")
+	}
+
+	t.log.Debugf("Received welcome message: %+v", welcomeMsg)
 
 	if welcomeMsg.Type != "welcome" {
 		return fmt.Errorf("unexpected initial message type: %s", welcomeMsg.Type)
 	}
 
-	t.log.Debug("Received welcome message from server")
-
 	// Create registration message
-	// Use the tunnel ID that was assigned by the server
+	// Important: Include both client ID and tunnel ID
+	regData := struct {
+		TunnelID string `json:"tunnel_id"`
+		ClientID string `json:"client_id,omitempty"` // Added ClientID
+	}{
+		TunnelID: t.ID,
+		ClientID: t.ID, // For now, use tunnel ID as client ID
+	}
+
+	// Marshal the registration data
+	regDataJSON, err := json.Marshal(regData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal registration data: %w", err)
+	}
+
+	// Create the registration message
 	regMsg := TunnelMessage{
 		Type:      "register_tunnel",
 		RequestID: uuid.New().String(),
-		TunnelID:  t.ID, // This is the ID assigned by the server
-		Data:      json.RawMessage([]byte(`{"tunnel_id":"` + t.ID + `"}`)),
+		TunnelID:  t.ID,
+		Data:      regDataJSON,
 	}
+
+	// Log the message being sent
+	t.log.Debugf("Sending tunnel registration message: %+v", regMsg)
 
 	// Send registration message
 	if err := websocket.JSON.Send(t.wsConn, regMsg); err != nil {
 		return fmt.Errorf("failed to send registration message: %w", err)
 	}
 
-	// Wait for response (with timeout)
-	var response TunnelMessage
-	t.wsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if err := websocket.JSON.Receive(t.wsConn, &response); err != nil {
-		return fmt.Errorf("failed to receive registration response: %w", err)
-	}
-	t.wsConn.SetReadDeadline(time.Time{}) // Reset deadline
+	// Start a goroutine to read the response message
+	go func() {
+		var response TunnelMessage
+		if err := websocket.JSON.Receive(t.wsConn, &response); err != nil {
+			errChan <- fmt.Errorf("failed to receive registration response: %w", err)
+			return
+		}
+		msgChan <- response
+	}()
 
-	// Check response
+	// Wait for the response message with timeout
+	var response TunnelMessage
+	select {
+	case err := <-errChan:
+		return err
+	case response = <-msgChan:
+		// Process response message
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("timeout waiting for registration response")
+	}
+
+	// Check response and log it
+	t.log.Debugf("Received registration response: %+v", response)
+
 	if response.Type == "error" {
 		var errResp struct {
 			Message string `json:"message"`
@@ -399,27 +614,71 @@ func (t *Tunnel) registerTunnel() error {
 
 // handleMessages processes incoming WebSocket messages
 func (t *Tunnel) handleMessages() {
-	// Log the first message received
-	var firstMessage TunnelMessage
-	if err := websocket.JSON.Receive(t.wsConn, &firstMessage); err != nil {
-		t.log.WithError(err).Error("Failed to receive initial message")
-		return
-	}
+	// We no longer need to receive the first message here
+	// since registerTunnel already handled the welcome message
 
-	t.log.WithField("message", firstMessage).Debug("First message received")
+	// Set up recovery for any panics
+	defer func() {
+		if r := recover(); r != nil {
+			t.log.Errorf("Recovered from panic in message handler: %v", r)
+
+			// Try to reconnect
+			go func() {
+				t.log.Info("Attempting to reconnect after panic...")
+				time.Sleep(5 * time.Second)
+
+				// Close existing connection if any
+				t.mu.Lock()
+				if t.wsConn != nil {
+					t.wsConn.Close()
+					t.wsConn = nil
+				}
+				t.mu.Unlock()
+
+				// Try to reconnect
+				if err := t.connectWebSocket(); err != nil {
+					t.log.WithError(err).Error("Failed to reconnect after panic")
+					return
+				}
+
+				// Re-register the tunnel
+				if err := t.registerTunnel(); err != nil {
+					t.log.WithError(err).Error("Failed to re-register tunnel after panic")
+					return
+				}
+
+				// Restart message handling
+				go t.handleMessages()
+			}()
+		}
+	}()
 
 	for {
 		var message TunnelMessage
-		if err := websocket.JSON.Receive(t.wsConn, &message); err != nil {
+
+		// Use a timeout for receiving messages
+		t.wsConn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		err := websocket.JSON.Receive(t.wsConn, &message)
+		t.wsConn.SetReadDeadline(time.Time{}) // Reset deadline
+
+		if err != nil {
 			if err == io.EOF {
 				t.log.Info("WebSocket connection closed by server")
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// This is a timeout, which could be normal if no messages are being sent
+				// Just continue the loop and wait for the next message
+				t.log.Debug("WebSocket read timeout - this is normal if no messages are being sent")
+				continue
 			} else {
 				t.log.WithError(err).Error("Error reading from WebSocket")
 			}
 
 			// Set connection to nil for reconnection
 			t.mu.Lock()
-			t.wsConn = nil
+			if t.wsConn != nil {
+				t.wsConn.Close()
+				t.wsConn = nil
+			}
 			t.mu.Unlock()
 
 			// Signal reconnection if not stopping
@@ -428,13 +687,30 @@ func (t *Tunnel) handleMessages() {
 				// Already stopping
 				return
 			default:
-				// Will be reconnected by the reconnection goroutine
+				// Try to reconnect
+				go func() {
+					t.log.Info("Attempting to reconnect...")
+					time.Sleep(5 * time.Second)
+
+					if err := t.connectWebSocket(); err != nil {
+						t.log.WithError(err).Error("Failed to reconnect")
+						return
+					}
+
+					if err := t.registerTunnel(); err != nil {
+						t.log.WithError(err).Error("Failed to re-register tunnel")
+						return
+					}
+
+					go t.handleMessages()
+				}()
 				return
 			}
 		}
 
 		// Process the message based on its type
-		t.log.Debugf("Received message type: %s", message.Type)
+		t.log.Debugf("Received message: type=%s, request_id=%s, tunnel_id=%s",
+			message.Type, message.RequestID, message.TunnelID)
 
 		switch message.Type {
 		case "http_request":
@@ -445,6 +721,14 @@ func (t *Tunnel) handleMessages() {
 			t.handlePing(message)
 		case "error":
 			t.handleError(message)
+		case "welcome":
+			// Already handled in registerTunnel, but handle again if we get another
+			t.log.Debug("Received welcome message (redundant)")
+			// No need to respond to this
+		case "tunnel_registered":
+			// Already handled in registerTunnel, but handle again if we get another
+			t.log.Debug("Received tunnel_registered message (redundant)")
+			// No need to respond to this
 		default:
 			t.log.Warnf("Unknown message type: %s", message.Type)
 		}
