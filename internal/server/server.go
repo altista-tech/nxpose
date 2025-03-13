@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"nxpose/internal/crypto"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +47,11 @@ type Server struct {
 	log       *logger.Logger
 	wsManager *WebSocketManager
 
-	httpServer   *http.Server
-	tunnelServer *http.Server
-	tunnels      *TunnelRegistry
+	httpServer         *http.Server
+	tunnelServer       *http.Server
+	acmeHTTPServer     *http.Server
+	tunnels            *TunnelRegistry
+	certificateManager *crypto.CertificateManager
 
 	mu       sync.Mutex
 	stopping bool
@@ -139,6 +142,8 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		"host":      host,
 		"subdomain": subdomain,
 		"path":      r.URL.Path,
+		"scheme":    r.URL.Scheme,
+		"proto":     r.Proto,
 	}).Debug("Received tunnel request")
 
 	// If no subdomain is found or it's empty, show a welcome page
@@ -168,6 +173,33 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 	tunnel.LastActive = time.Now()
 	tunnel.connections++
 
+	// Determine if request is HTTP or HTTPS based on TLS connection
+	isSecure := r.TLS != nil
+
+	// Check if protocol matches the request scheme
+	if (tunnel.Protocol == "https" && !isSecure) || (tunnel.Protocol == "http" && isSecure) {
+		// Protocol mismatch, need to redirect
+		var redirectURL string
+		if tunnel.Protocol == "https" {
+			// Redirect to HTTPS
+			redirectURL = fmt.Sprintf("https://%s%s", r.Host, r.URL.Path)
+			if r.URL.RawQuery != "" {
+				redirectURL += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+			s.log.Debugf("Redirecting HTTP request to HTTPS: %s", redirectURL)
+		} else {
+			// This is unlikely (redirecting from HTTPS to HTTP), but handle it anyway
+			redirectURL = fmt.Sprintf("http://%s%s", r.Host, r.URL.Path)
+			if r.URL.RawQuery != "" {
+				redirectURL += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+			s.log.Debugf("Redirecting HTTPS request to HTTP: %s", redirectURL)
+		}
+		return
+	}
+
 	// Forward the request based on protocol
 	switch tunnel.Protocol {
 	case "http", "https":
@@ -177,6 +209,13 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 			s.log.WithField("tunnel_id", tunnel.ID).Error("No WebSocket connection for tunnel")
 			http.Error(w, "Tunnel not connected", http.StatusServiceUnavailable)
 			return
+		}
+
+		// Set a custom header to indicate the original protocol
+		if isSecure {
+			r.Header.Set("X-Forwarded-Proto", "https")
+		} else {
+			r.Header.Set("X-Forwarded-Proto", "http")
 		}
 
 		// Forward the request to the client via WebSocket
@@ -218,6 +257,90 @@ func (s *Server) forwardHTTPRequest(w http.ResponseWriter, r *http.Request, wsTu
 	}).Debug("HTTP response forwarded to client")
 }
 
+// initCertificateManager initializes the Let's Encrypt certificate manager
+func (s *Server) initCertificateManager(ctx context.Context) error {
+	// Skip if Let's Encrypt is not enabled
+	if !s.config.LetsEncrypt.Enabled {
+		s.log.Info("Let's Encrypt is not enabled, using provided TLS certificates")
+		return nil
+	}
+
+	// Validate required configuration
+	if s.config.LetsEncrypt.Email == "" {
+		return fmt.Errorf("Let's Encrypt email address is required")
+	}
+
+	// Set up domains to request certificates for
+	// Important: Order matters here. Request the wildcard first, then the base domain
+	domains := []string{
+		"*." + s.config.BaseDomain, // Wildcard certificate
+		s.config.BaseDomain,        // Base domain certificate
+	}
+
+	s.log.Infof("Requesting certificates for domains: %v", domains)
+
+	// Create HTTP server for ACME challenges on port 80 (if needed for HTTP validation)
+	acmeMux := http.NewServeMux()
+	s.acmeHTTPServer = &http.Server{
+		Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
+		Handler: acmeMux,
+	}
+
+	// Configure DNS provider for DNS-01 challenges if specified
+	if s.config.LetsEncrypt.DNSProvider != "" {
+		s.log.Infof("Using DNS provider: %s for ACME DNS-01 challenges", s.config.LetsEncrypt.DNSProvider)
+
+		// Ensure environment variables are populated if credentials use env vars
+		for key, value := range s.config.LetsEncrypt.DNSCredentials {
+			if strings.HasPrefix(value, "${") && strings.HasSuffix(value, "}") {
+				envVar := strings.TrimSuffix(strings.TrimPrefix(value, "${"), "}")
+				envValue := os.Getenv(envVar)
+				if envValue == "" {
+					s.log.Warnf("Environment variable %s not found or empty", envVar)
+				} else {
+					s.config.LetsEncrypt.DNSCredentials[key] = envValue
+				}
+			}
+		}
+	} else {
+		s.log.Info("No DNS provider specified, using HTTP-01 challenge")
+		s.log.Warn("HTTP-01 challenge cannot issue wildcard certificates, consider using DNS-01")
+	}
+
+	// Create certificate manager config
+	cmConfig := crypto.CertificateManagerConfig{
+		Email:       s.config.LetsEncrypt.Email,
+		Domains:     domains,
+		Environment: s.config.LetsEncrypt.Environment,
+		StorageDir:  s.config.LetsEncrypt.StorageDir,
+		HTTPServer:  s.acmeHTTPServer,
+		Logger:      s.log.Logger,
+		// Add DNS configuration
+		DNSProvider:    s.config.LetsEncrypt.DNSProvider,
+		DNSCredentials: s.config.LetsEncrypt.DNSCredentials,
+	}
+
+	// Create certificate manager
+	certManager, err := crypto.NewCertificateManager(cmConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate manager: %w", err)
+	}
+
+	// Start certificate manager
+	if err := certManager.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start certificate manager: %w", err)
+	}
+
+	// Store certificate manager
+	s.certificateManager = certManager
+
+	// Update TLS config with certificate manager
+	s.tlsConfig = certManager.GetTLSConfig()
+
+	s.log.Info("Certificate manager initialized successfully")
+	return nil
+}
+
 // Start starts the server, initializing HTTP and tunnel servers
 func (s *Server) Start() error {
 	s.mu.Lock()
@@ -227,6 +350,14 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server is shutting down")
 	}
 
+	// Initialize certificate manager if Let's Encrypt is enabled
+	ctx := context.Background()
+	if s.config.LetsEncrypt.Enabled {
+		if err := s.initCertificateManager(ctx); err != nil {
+			return fmt.Errorf("failed to initialize certificate manager: %w", err)
+		}
+	}
+
 	// Set up HTTP server
 	mux := http.NewServeMux()
 
@@ -234,6 +365,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/tunnel", s.handleTunnel)
 	mux.HandleFunc("/api/ws", s.handleWebSocket)
+	mux.HandleFunc("/api/status", s.handleStatus)
 
 	// Default handler for tunnel requests
 	mux.HandleFunc("/", s.handleTunnelRequest)
@@ -245,12 +377,30 @@ func (s *Server) Start() error {
 		TLSConfig: s.tlsConfig,
 	}
 
-	// Create HTTP server on port 80 for tunnel traffic
-	tunnelMux := http.NewServeMux()
-	tunnelMux.HandleFunc("/", s.handleTunnelRequest) // Only handle tunnel requests
-	s.tunnelServer = &http.Server{
-		Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
-		Handler: tunnelMux,
+	// If Let's Encrypt is not enabled, create dedicated HTTP server for tunnel traffic
+	if !s.config.LetsEncrypt.Enabled {
+		tunnelMux := http.NewServeMux()
+		tunnelMux.HandleFunc("/", s.handleTunnelRequest) // Only handle tunnel requests
+		s.tunnelServer = &http.Server{
+			Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
+			Handler: tunnelMux,
+		}
+	} else {
+		// When Let's Encrypt is enabled, we use the acmeHTTPServer that was created
+		// in initCertificateManager to handle both ACME challenges and tunnel requests
+
+		// Add the tunnel request handler to the ACME mux
+		// Get the mux from the ACME HTTP server
+		acmeMux, ok := s.acmeHTTPServer.Handler.(*http.ServeMux)
+		if ok {
+			// Add tunnel request handler
+			acmeMux.HandleFunc("/", s.handleTunnelRequest)
+		} else {
+			return fmt.Errorf("failed to add tunnel handler to ACME HTTP server")
+		}
+
+		// The ACME server is already using port 80, so we don't need a separate tunnel server
+		s.tunnelServer = s.acmeHTTPServer
 	}
 
 	// Start monitoring
@@ -307,6 +457,14 @@ func (s *Server) Stop() error {
 	// Close all WebSocket connections
 	s.log.Info("Closing all WebSocket connections")
 	s.wsManager.CloseAll()
+
+	// Stop certificate manager if it exists
+	if s.certificateManager != nil {
+		s.log.Info("Stopping certificate manager")
+		if err := s.certificateManager.Stop(); err != nil {
+			s.log.Errorf("Error stopping certificate manager: %v", err)
+		}
+	}
 
 	s.log.Info("Server shutdown complete")
 	return nil
@@ -417,6 +575,12 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate protocol
+	if reqBody.Protocol != "http" && reqBody.Protocol != "https" && reqBody.Protocol != "tcp" {
+		http.Error(w, "Unsupported protocol", http.StatusBadRequest)
+		return
+	}
+
 	// Generate tunnel ID
 	tunnelID := uuid.New().String()
 
@@ -439,8 +603,21 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	s.tunnels.tunnels[tunnelID] = tunnel
 	s.tunnels.mu.Unlock()
 
-	// Construct public URL
-	publicURL := fmt.Sprintf("%s://%s.%s", reqBody.Protocol, subdomain, s.config.BaseDomain)
+	// Construct public URL - now properly handling HTTP vs. HTTPS
+	var publicURL string
+	if reqBody.Protocol == "https" {
+		// Make sure we have Let's Encrypt configured or certs available
+		if s.certificateManager != nil || (s.config.TLSCert != "" && s.config.TLSKey != "") {
+			publicURL = fmt.Sprintf("https://%s.%s", subdomain, s.config.BaseDomain)
+		} else {
+			// Fall back to HTTP if we don't have HTTPS capabilities
+			s.log.Warn("HTTPS requested but no certificates available, falling back to HTTP")
+			publicURL = fmt.Sprintf("http://%s.%s", subdomain, s.config.BaseDomain)
+			tunnel.Protocol = "http" // Update the protocol in the stored tunnel
+		}
+	} else {
+		publicURL = fmt.Sprintf("%s://%s.%s", reqBody.Protocol, subdomain, s.config.BaseDomain)
+	}
 
 	// Create response
 	resp := TunnelResponse{
@@ -500,6 +677,39 @@ func generateRandomSubdomain(length int) string {
 	}
 
 	return string(result)
+}
+
+// handleStatus returns the current status of the server
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	// Collect status information
+	status := map[string]interface{}{
+		"version": "1.0.0",                         // Replace with actual version
+		"uptime":  time.Since(time.Now()).String(), // Just a placeholder - real impl would use server start time
+		"tunnels": len(s.tunnels.tunnels),
+	}
+
+	// Add TLS configuration information
+	tlsInfo := map[string]interface{}{
+		"enabled": s.tlsConfig != nil,
+	}
+
+	// Add certificate information if Let's Encrypt is enabled
+	if s.config.LetsEncrypt.Enabled && s.certificateManager != nil {
+		tlsInfo["provider"] = "Let's Encrypt"
+		tlsInfo["certificates"] = s.certificateManager.Status()
+	} else if s.config.TLSCert != "" && s.config.TLSKey != "" {
+		tlsInfo["provider"] = "Custom certificate"
+		tlsInfo["cert_file"] = s.config.TLSCert
+	} else {
+		tlsInfo["provider"] = "None"
+	}
+
+	status["tls"] = tlsInfo
+
+	// Return status as JSON
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(status)
 }
 
 // Add the CloseAll method to WebSocketManager

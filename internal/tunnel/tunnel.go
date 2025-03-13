@@ -489,11 +489,28 @@ func (t *Tunnel) handleHTTPRequest(message TunnelMessage) {
 		return
 	}
 
-	// Create HTTP request to local service
+	// Determine which protocol to use for local connection
+	// Check if the original request was HTTPS by examining the X-Forwarded-Proto header
+	isSecureRequest := false
+	for key, value := range httpReq.Headers {
+		if strings.ToLower(key) == "x-forwarded-proto" && value == "https" {
+			isSecureRequest = true
+			break
+		}
+	}
+
+	// Create URL for local service
+	// Note: We always use HTTP for local connection, regardless of the external protocol
+	// This is because we're connecting to a local service which typically doesn't use HTTPS
 	localURL := fmt.Sprintf("http://localhost:%d%s", t.LocalPort, httpReq.Path)
 	if httpReq.Query != "" {
 		localURL += "?" + httpReq.Query
 	}
+
+	// Log the request with the original protocol
+	t.log.Debugf("Forwarding %s request to local service: %s %s",
+		map[bool]string{true: "HTTPS", false: "HTTP"}[isSecureRequest],
+		httpReq.Method, localURL)
 
 	// Create request
 	req, err := http.NewRequest(httpReq.Method, localURL, bytes.NewReader(httpReq.Body))
@@ -508,12 +525,22 @@ func (t *Tunnel) handleHTTPRequest(message TunnelMessage) {
 		req.Header.Set(key, value)
 	}
 
+	// Add original protocol info in headers if not already present
+	if isSecureRequest && req.Header.Get("X-Forwarded-Proto") == "" {
+		req.Header.Set("X-Forwarded-Proto", "https")
+	}
+
 	// Forward request to local service
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		// Skip TLS verification for local connections if needed
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
 	}
 
-	t.log.Debugf("Forwarding request to local service: %s %s", httpReq.Method, localURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.log.Errorf("Failed to forward request to local service: %v", err)
@@ -564,7 +591,9 @@ func (t *Tunnel) handleHTTPRequest(message TunnelMessage) {
 		t.log.Errorf("Failed to send HTTP response: %v", err)
 	}
 
-	t.log.Infof("Forwarded request: %s %s, status: %d, body size: %d",
+	// Use additional logging for HTTPS requests
+	t.log.Infof("Forwarded %s request: %s %s, status: %d, body size: %d",
+		map[bool]string{true: "HTTPS", false: "HTTP"}[isSecureRequest],
 		httpReq.Method, httpReq.Path, resp.StatusCode, len(body))
 }
 

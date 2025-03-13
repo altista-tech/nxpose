@@ -6,7 +6,22 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+
+	"nxpose/internal/crypto"
 )
+
+// LetsEncryptConfig holds configuration for Let's Encrypt integration
+type LetsEncryptConfig struct {
+	// Existing fields
+	Enabled     bool
+	Email       string
+	Environment crypto.Environment
+	StorageDir  string
+
+	// New DNS fields
+	DNSProvider    string
+	DNSCredentials map[string]string
+}
 
 // ServerConfig holds all configuration for the server
 type ServerConfig struct {
@@ -19,19 +34,37 @@ type ServerConfig struct {
 	TLSCert string
 	TLSKey  string
 
+	// Let's Encrypt settings
+	LetsEncrypt LetsEncryptConfig
+
 	// Common settings
 	Verbose bool
 }
 
 // DefaultServerConfig returns a server config with default values
 func DefaultServerConfig() *ServerConfig {
+	// Get home directory for default storage
+	homeDir, err := os.UserHomeDir()
+	storageDir := ""
+	if err == nil {
+		storageDir = filepath.Join(homeDir, ".nxpose", "certificates")
+	}
+
 	return &ServerConfig{
 		BindAddress: "0.0.0.0",
 		Port:        8080,
 		BaseDomain:  "nxpose.local",
 		TLSCert:     "",
 		TLSKey:      "",
-		Verbose:     false,
+		LetsEncrypt: LetsEncryptConfig{
+			Enabled:        false,
+			Email:          "",
+			Environment:    crypto.ProductionEnv,
+			StorageDir:     storageDir,
+			DNSProvider:    "",
+			DNSCredentials: make(map[string]string),
+		},
+		Verbose: false,
 	}
 }
 
@@ -86,8 +119,39 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 	if viper.IsSet("tls.key") {
 		config.TLSKey = viper.GetString("tls.key")
 	}
+
+	// Let's Encrypt settings
+	if viper.IsSet("letsencrypt.enabled") {
+		config.LetsEncrypt.Enabled = viper.GetBool("letsencrypt.enabled")
+	}
+	if viper.IsSet("letsencrypt.email") {
+		config.LetsEncrypt.Email = viper.GetString("letsencrypt.email")
+	}
+	if viper.IsSet("letsencrypt.environment") {
+		env := viper.GetString("letsencrypt.environment")
+		if env == "staging" {
+			config.LetsEncrypt.Environment = crypto.StagingEnv
+		} else {
+			config.LetsEncrypt.Environment = crypto.ProductionEnv
+		}
+	}
+	if viper.IsSet("letsencrypt.storage_dir") {
+		config.LetsEncrypt.StorageDir = viper.GetString("letsencrypt.storage_dir")
+	}
+
 	if viper.IsSet("verbose") {
 		config.Verbose = viper.GetBool("verbose")
+	}
+
+	// Load DNS provider
+	if viper.IsSet("letsencrypt.dns.provider") {
+		config.LetsEncrypt.DNSProvider = viper.GetString("letsencrypt.dns.provider")
+	}
+
+	// Load DNS credentials
+	if viper.IsSet("letsencrypt.dns.credentials") {
+		credentials := viper.GetStringMapString("letsencrypt.dns.credentials")
+		config.LetsEncrypt.DNSCredentials = credentials
 	}
 
 	return config, nil
@@ -101,6 +165,17 @@ func SaveServerConfig(config *ServerConfig, filePath string) error {
 	viper.Set("server.domain", config.BaseDomain)
 	viper.Set("tls.cert", config.TLSCert)
 	viper.Set("tls.key", config.TLSKey)
+
+	// Let's Encrypt settings
+	viper.Set("letsencrypt.enabled", config.LetsEncrypt.Enabled)
+	viper.Set("letsencrypt.email", config.LetsEncrypt.Email)
+	if config.LetsEncrypt.Environment == crypto.StagingEnv {
+		viper.Set("letsencrypt.environment", "staging")
+	} else {
+		viper.Set("letsencrypt.environment", "production")
+	}
+	viper.Set("letsencrypt.storage_dir", config.LetsEncrypt.StorageDir)
+
 	viper.Set("verbose", config.Verbose)
 
 	// If no file path provided, use default

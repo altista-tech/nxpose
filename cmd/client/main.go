@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -59,12 +62,50 @@ local services to the internet through secure tunnels.`,
 	// Add subcommands
 	rootCmd.AddCommand(createRegisterCommand())
 	rootCmd.AddCommand(createExposeCommand())
+	rootCmd.AddCommand(createStatusCommand())
 
 	// Execute the command
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// getServerStatus queries the server for its status information
+func getServerStatus(serverHost string, serverPort int) (map[string]interface{}, error) {
+	// Construct the status API URL
+	url := fmt.Sprintf("https://%s:%d/api/status", serverHost, serverPort)
+
+	// Create an HTTP client with TLS configuration
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Send the request
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned non-OK status: %d", resp.StatusCode)
+	}
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse the JSON response
+	var status map[string]interface{}
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return status, nil
 }
 
 func createExposeCommand() *cobra.Command {
@@ -220,6 +261,93 @@ func createRegisterCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&saveConfig, "save-config", false, "Save configuration after registration")
 	cmd.Flags().BoolVar(&saveCert, "save-cert", false, "Save certificate to file after registration")
 	cmd.Flags().BoolVar(&forceNewCert, "force-new-cert", false, "Force generation of a new certificate even if one exists")
+
+	return cmd
+}
+
+// createStatusCommand creates the 'status' subcommand
+func createStatusCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Check the status of the nxpose server",
+		Long:  `Connect to the nxpose server to check its status, including certificate information.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Log connection attempt
+			log.WithField("server", fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort)).
+				Info("Connecting to server for status check")
+
+			// Query server status
+			status, err := getServerStatus(cfg.ServerHost, cfg.ServerPort)
+			if err != nil {
+				log.WithError(err).Error("Failed to get server status")
+				fmt.Fprintf(os.Stderr, "Error: Failed to get server status: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Display the status information
+			fmt.Println("🟢 NXpose Server Status")
+			fmt.Println("====================")
+
+			// Print version and uptime
+			fmt.Printf("Version: %s\n", status["version"])
+			fmt.Printf("Uptime: %s\n", status["uptime"])
+			fmt.Printf("Active tunnels: %d\n", int(status["tunnels"].(float64)))
+			fmt.Println()
+
+			// Print TLS information
+			tlsInfo := status["tls"].(map[string]interface{})
+			fmt.Println("🔒 TLS Configuration")
+			fmt.Printf("Provider: %s\n", tlsInfo["provider"])
+
+			// If Let's Encrypt is enabled, show certificate details
+			if tlsInfo["provider"] == "Let's Encrypt" && tlsInfo["certificates"] != nil {
+				certInfo := tlsInfo["certificates"].(map[string]interface{})
+
+				fmt.Println("Let's Encrypt Configuration:")
+				fmt.Printf("  Email: %s\n", certInfo["email"])
+				fmt.Printf("  Environment: %s\n", certInfo["environment"])
+
+				// Display certificate information for each domain
+				if certs, ok := certInfo["certificates"].(map[string]interface{}); ok {
+					fmt.Println("\nCertificates:")
+					for domain, info := range certs {
+						certDetails := info.(map[string]interface{})
+
+						// Check if there was an error obtaining the certificate
+						if errMsg, hasError := certDetails["error"]; hasError {
+							fmt.Printf("  %s: Error - %s\n", domain, errMsg)
+							continue
+						}
+
+						// Format and display certificate information
+						fmt.Printf("  %s:\n", domain)
+						fmt.Printf("    Issuer: %s\n", certDetails["issuer"])
+
+						// Convert the time strings to Time objects and format them
+						if notBefore, ok := certDetails["notBefore"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, notBefore); err == nil {
+								fmt.Printf("    Valid from: %s\n", t.Format("2006-01-02 15:04:05"))
+							}
+						}
+
+						if notAfter, ok := certDetails["notAfter"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, notAfter); err == nil {
+								fmt.Printf("    Valid until: %s\n", t.Format("2006-01-02 15:04:05"))
+							}
+						}
+
+						// Calculate and display days until expiration
+						if notAfter, ok := certDetails["notAfter"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, notAfter); err == nil {
+								daysLeft := int(time.Until(t).Hours() / 24)
+								fmt.Printf("    Days until expiration: %d\n", daysLeft)
+							}
+						}
+					}
+				}
+			}
+		},
+	}
 
 	return cmd
 }
