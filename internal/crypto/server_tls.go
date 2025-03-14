@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"math/big"
 	"net"
 	"os"
@@ -16,20 +17,47 @@ import (
 )
 
 // LoadOrGenerateServerCertificate loads existing TLS certificates or generates new ones for the server
-func LoadOrGenerateServerCertificate(certPath, keyPath string) (*tls.Config, error) {
+// Modified to prioritize Let's Encrypt configuration and add logging
+func LoadOrGenerateServerCertificate(certPath, keyPath string, log *logrus.Logger) (*tls.Config, error) {
+	if log == nil {
+		log = logrus.New()
+	}
+
+	log.Info("Setting up server TLS certificates")
+
+	// Skip loading default certificates if Let's Encrypt will be used
+	// This check is now removed, letting the server decide whether to use
+	// Let's Encrypt later in the process
+
 	// If paths are provided, try to load the certificates
 	if certPath != "" && keyPath != "" {
-		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
-		}
+		log.Debugf("Attempting to load certificates from %s and %s", certPath, keyPath)
+		if fileExists(certPath) && fileExists(keyPath) {
+			cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				log.Warnf("Failed to load TLS certificate: %v", err)
+			} else {
+				log.Infof("Loaded TLS certificates from %s and %s", certPath, keyPath)
 
-		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
+				// Log certificate details for debugging
+				x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+				if err == nil {
+					log.Debugf("Certificate subject: %v", x509Cert.Subject)
+					log.Debugf("Certificate issuer: %v", x509Cert.Issuer)
+					log.Debugf("Certificate valid until: %v", x509Cert.NotAfter)
+					log.Debugf("Certificate DNS names: %v", x509Cert.DNSNames)
+				}
 
-		return tlsConfig, nil
+				tlsConfig := &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					MinVersion:   tls.VersionTLS12,
+				}
+
+				return tlsConfig, nil
+			}
+		} else {
+			log.Warnf("Certificate files not found at %s and %s", certPath, keyPath)
+		}
 	}
 
 	// If paths are not provided, check for default certificates
@@ -39,25 +67,44 @@ func LoadOrGenerateServerCertificate(certPath, keyPath string) (*tls.Config, err
 		defaultKeyPath := filepath.Join(homeDir, ".nxpose", "server.key")
 
 		if fileExists(defaultCertPath) && fileExists(defaultKeyPath) {
+			log.Debugf("Found default certificate files at %s and %s", defaultCertPath, defaultKeyPath)
+
 			cert, err := tls.LoadX509KeyPair(defaultCertPath, defaultKeyPath)
 			if err == nil {
 				tlsConfig := &tls.Config{
 					Certificates: []tls.Certificate{cert},
 					MinVersion:   tls.VersionTLS12,
 				}
-				fmt.Printf("Using existing certificates from %s\n", defaultCertPath)
+				log.Infof("Using existing certificates from %s", defaultCertPath)
+
+				// These are temporary certificates - log prominently
+				log.Warn("Using self-signed certificates. HTTPS connections will show security warnings.")
+				log.Warn("Configure Let's Encrypt for proper certificates.")
+
 				return tlsConfig, nil
+			} else {
+				log.Warnf("Failed to load default certificates: %v", err)
 			}
 		}
 	}
 
 	// If we couldn't load existing certificates, generate new ones
-	fmt.Println("Generating new self-signed certificate for the server...")
-	return generateServerCertificate()
+	log.Info("Generating new self-signed certificate for the server...")
+	tlsConfig, err := generateServerCertificate(log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate self-signed certificate: %w", err)
+	}
+
+	// Log warning about self-signed certificate
+	log.Warn("Using newly generated self-signed certificate")
+	log.Warn("HTTPS connections will show security warnings in browsers")
+	log.Warn("Configure Let's Encrypt in server-config.yaml for proper certificates")
+
+	return tlsConfig, nil
 }
 
 // generateServerCertificate creates a new self-signed certificate for the server
-func generateServerCertificate() (*tls.Config, error) {
+func generateServerCertificate(log *logrus.Logger) (*tls.Config, error) {
 	// Generate a new private key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -119,16 +166,16 @@ func generateServerCertificate() (*tls.Config, error) {
 
 			// Write certificate
 			if err := os.WriteFile(certPath, certBuffer, 0644); err != nil {
-				fmt.Printf("Warning: Could not save certificate to %s: %v\n", certPath, err)
+				log.Warnf("Could not save certificate to %s: %v", certPath, err)
 			} else {
-				fmt.Printf("Server certificate saved to: %s\n", certPath)
+				log.Infof("Server certificate saved to: %s", certPath)
 			}
 
 			// Write private key with restricted permissions
 			if err := os.WriteFile(keyPath, keyBuffer, 0600); err != nil {
-				fmt.Printf("Warning: Could not save private key to %s: %v\n", keyPath, err)
+				log.Warnf("Could not save private key to %s: %v", keyPath, err)
 			} else {
-				fmt.Printf("Server private key saved to: %s\n", keyPath)
+				log.Infof("Server private key saved to: %s", keyPath)
 			}
 		}
 	}

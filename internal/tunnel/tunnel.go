@@ -245,7 +245,9 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 	subdomain := hostParts[0]
 
 	// Server domain is the rest joined together
-	serverDomain := strings.Join(hostParts[1:], ".")
+	//serverDomain := strings.Join(hostParts[1:], ".")
+
+	serverHost := parsedURL.Hostname()
 
 	// Extract server port from URL if present, otherwise use default port
 	serverPort := 8443
@@ -265,7 +267,7 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 		LocalPort:  localPort,
 		PublicURL:  publicURL,
 		CertData:   certData,
-		ServerHost: serverDomain,
+		ServerHost: serverHost,
 		ServerPort: serverPort,
 		stopCh:     make(chan struct{}),
 		log:        logrus.New(),
@@ -457,7 +459,7 @@ func (t *Tunnel) connectWebSocket() error {
 
 	// Configure TLS with insecure skip verify for development
 	config.TlsConfig = &tls.Config{
-		InsecureSkipVerify: true, // Only for development - should use proper certificates in production
+		InsecureSkipVerify: false, // Only for development - should use proper certificates in production
 	}
 
 	// Log the connection attempt

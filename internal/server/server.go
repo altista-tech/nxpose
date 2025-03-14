@@ -428,13 +428,45 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server is shutting down")
 	}
 
-	// Initialize certificate manager if Let's Encrypt is enabled
+	// Always check Let's Encrypt configuration first before loading certificates
 	ctx := context.Background()
 	if s.config.LetsEncrypt.Enabled {
+		s.log.Info("Let's Encrypt is enabled, initializing certificate manager...")
+
+		// We'll initially set up a temporary TLS configuration if needed,
+		// which will be replaced by the Let's Encrypt certificates
+		if s.tlsConfig == nil {
+			tempConfig, err := crypto.LoadOrGenerateServerCertificate(s.config.TLSCert, s.config.TLSKey, s.log.Logger)
+			if err != nil {
+				return fmt.Errorf("failed to load temporary certificates: %w", err)
+			}
+			s.tlsConfig = tempConfig
+			s.log.Info("Using temporary TLS configuration while initializing Let's Encrypt")
+		}
+
 		if err := s.initCertificateManager(ctx); err != nil {
-			return fmt.Errorf("failed to initialize certificate manager: %w", err)
+			s.log.Errorf("Let's Encrypt initialization failed: %v", err)
+			s.log.Warn("Falling back to standard TLS certificates")
+
+			// Don't return an error here, just fall back to whatever certificates were loaded earlier
+		} else {
+			s.log.Info("Using Let's Encrypt certificates for HTTPS connections")
+		}
+	} else {
+		s.log.Info("Let's Encrypt is not enabled, using standard TLS certificates")
+
+		// Load regular certificates if Let's Encrypt is not enabled
+		if s.tlsConfig == nil {
+			var err error
+			s.tlsConfig, err = crypto.LoadOrGenerateServerCertificate(s.config.TLSCert, s.config.TLSKey, s.log.Logger)
+			if err != nil {
+				return fmt.Errorf("failed to initialize TLS configuration: %w", err)
+			}
 		}
 	}
+
+	// Now proceed with HTTP server setup
+	s.log.Info("Setting up HTTP servers...")
 
 	// Set up HTTP server
 	mux := http.NewServeMux()
@@ -466,6 +498,16 @@ func (s *Server) Start() error {
 	} else {
 		// When Let's Encrypt is enabled, we use the acmeHTTPServer that was created
 		// in initCertificateManager to handle both ACME challenges and tunnel requests
+
+		// Check if acmeHTTPServer exists - it should have been created during
+		// initCertificateManager if Let's Encrypt was properly initialized
+		if s.acmeHTTPServer == nil {
+			s.log.Warn("Let's Encrypt HTTP server not initialized, creating a basic HTTP server")
+			s.acmeHTTPServer = &http.Server{
+				Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
+				Handler: http.NewServeMux(),
+			}
+		}
 
 		// Add the tunnel request handler to the ACME mux
 		// Get the mux from the ACME HTTP server

@@ -72,7 +72,7 @@ func runServer() {
 	}).Info("Starting nxpose server")
 
 	// Load or generate TLS certificates
-	tlsConfig, err := crypto.LoadOrGenerateServerCertificate(cfg.TLSCert, cfg.TLSKey)
+	tlsConfig, err := crypto.LoadOrGenerateServerCertificate(cfg.TLSCert, cfg.TLSKey, log.Logger)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to set up TLS configuration")
 		fmt.Fprintf(os.Stderr, "Error: Failed to set up TLS configuration: %v\n", err)
