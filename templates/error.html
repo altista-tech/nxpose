@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Error</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+            text-align: center;
+        }
+        h1 {
+            color: #e74c3c;
+            margin-bottom: 20px;
+        }
+        .error-icon {
+            color: #e74c3c;
+            font-size: 48px;
+            margin: 20px 0;
+        }
+        .message {
+            margin-bottom: 30px;
+        }
+        .error-details {
+            background-color: #fdf7f7;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #3498db;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <script>
+        // This script handles redirecting the error back to the client
+        document.addEventListener('DOMContentLoaded', function() {
+            const callbackUrl = "{{.CallbackURL}}";
+            const stateToken = "{{.StateToken}}";
+            const errorInfo = "{{.ErrorInfo}}";
+            
+            if (callbackUrl && errorInfo) {
+                // Add parameters to the callback URL
+                const redirectUrl = new URL(callbackUrl);
+                redirectUrl.searchParams.append('error', errorInfo);
+                redirectUrl.searchParams.append('state', stateToken);
+                
+                // Redirect back to the client
+                setTimeout(function() {
+                    window.location.href = redirectUrl.toString();
+                }, 3000);
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Authentication Error</h1>
+    
+    <div class="error-icon">✗</div>
+    
+    <div class="message">
+        <p>There was an error during the authentication process.</p>
+        <p>You will be redirected back to the nxpose client automatically.</p>
+    </div>
+    
+    <div class="error-details">
+        <p><strong>Error details:</strong></p>
+        <p>{{.ErrorInfo}}</p>
+    </div>
+    
+    <a href="/" class="back-link">Return to Home</a>
+</body>
+</html> 

@@ -56,9 +56,23 @@ nxpose expose http 3000
 
 This will create a secure tunnel and provide you with a public URL that forwards to your local service.
 
+#### Skip Local Service Check
+
+When testing webhooks or scenarios where you need to get the URL before starting your local service:
+
+```bash
+nxpose expose http 3000 --skip-local-check
+```
+
+This will create a tunnel without checking if the local service is running, which is useful when you need the public URL to configure your local application.
+
 ### Server Configuration
 
-To run your own NXpose server, create a `server-config.yaml` file (see example below) and run:
+To run your own NXpose server, you can use either a configuration file or environment variables.
+
+#### Using a Configuration File
+
+Create a `server-config.yaml` file (see example below) and run:
 
 ```bash
 nxpose-server --config server-config.yaml
@@ -86,6 +100,38 @@ logging:
 # Enable verbose output for debugging
 verbose: false
 ```
+
+#### Using Environment Variables
+
+You can also configure the server using environment variables:
+
+```bash
+# Basic configuration
+export NXPOSE_SERVER_BIND_ADDRESS="0.0.0.0"
+export NXPOSE_SERVER_PORT=8443
+export NXPOSE_SERVER_DOMAIN="nxpose.example.com"
+export NXPOSE_TLS_CERT="/path/to/cert.pem"
+export NXPOSE_TLS_KEY="/path/to/key.pem"
+export NXPOSE_VERBOSE=true
+
+# Start the server (without a config file)
+nxpose-server
+```
+
+Available environment variables include:
+
+| Environment Variable | Description | Default |
+| --- | --- | --- |
+| NXPOSE_SERVER_BIND_ADDRESS | Address to bind the server to | 0.0.0.0 |
+| NXPOSE_SERVER_PORT | Port to listen on | 8443 |
+| NXPOSE_SERVER_DOMAIN | Base domain for tunnels | localhost |
+| NXPOSE_TLS_CERT | Path to TLS certificate file | "" |
+| NXPOSE_TLS_KEY | Path to TLS key file | "" |
+| NXPOSE_VERBOSE | Enable verbose logging | false |
+| NXPOSE_LETSENCRYPT_ENABLED | Enable Let's Encrypt | false |
+| NXPOSE_LETSENCRYPT_EMAIL | Email for Let's Encrypt | "" |
+| NXPOSE_MONGODB_ENABLED | Enable MongoDB | false |
+| NXPOSE_MONGODB_URI | MongoDB connection URI | mongodb://localhost:27017 |
 
 ## Architecture
 

@@ -26,6 +26,9 @@ func (s *Server) tunnelCleanupRoutine() {
 		select {
 		case <-ticker.C:
 			s.cleanupInactiveTunnels()
+		case <-s.shutdownCh:
+			s.log.Info("Tunnel cleanup routine shutting down")
+			return
 		}
 	}
 }
@@ -41,6 +44,25 @@ func (s *Server) cleanupInactiveTunnels() {
 
 	s.tunnels.mu.RLock()
 	for id, tunnel := range s.tunnels.tunnels {
+		// Check if the tunnel has a websocket connection
+		wsTunnel, connected := s.wsManager.GetWebSocketTunnel(id)
+
+		// If there's no active WebSocket connection and it's been inactive for too long, remove it
+		if !connected {
+			if now.Sub(tunnel.LastActive) > inactiveThreshold {
+				tunnelsToRemove = append(tunnelsToRemove, id)
+				s.log.WithFields(logrus.Fields{
+					"tunnel_id":   id,
+					"subdomain":   tunnel.Subdomain,
+					"last_active": tunnel.LastActive,
+				}).Info("Removing inactive tunnel (no WebSocket connection)")
+				continue
+			}
+		} else if wsTunnel != nil {
+			// Update the tunnel's last activity time based on the WebSocket connection
+			tunnel.LastActive = wsTunnel.LastActive
+		}
+
 		// Check if the tunnel has expired (based on creation time)
 		if now.Sub(tunnel.CreateTime) > expiredThreshold {
 			tunnelsToRemove = append(tunnelsToRemove, id)
@@ -51,16 +73,6 @@ func (s *Server) cleanupInactiveTunnels() {
 			}).Info("Removing expired tunnel")
 			continue
 		}
-
-		// Check if the tunnel has been inactive for too long
-		if now.Sub(tunnel.LastActive) > inactiveThreshold {
-			tunnelsToRemove = append(tunnelsToRemove, id)
-			s.log.WithFields(logrus.Fields{
-				"tunnel_id":   id,
-				"subdomain":   tunnel.Subdomain,
-				"last_active": tunnel.LastActive,
-			}).Info("Removing inactive tunnel")
-		}
 	}
 	s.tunnels.mu.RUnlock()
 
@@ -69,6 +81,9 @@ func (s *Server) cleanupInactiveTunnels() {
 		s.tunnels.mu.Lock()
 		for _, id := range tunnelsToRemove {
 			delete(s.tunnels.tunnels, id)
+
+			// Also remove from WebSocket manager if present
+			s.wsManager.UnregisterWebSocketTunnel(id)
 		}
 		s.tunnels.mu.Unlock()
 
@@ -85,20 +100,25 @@ func (s *Server) statsRoutine() {
 		select {
 		case <-ticker.C:
 			s.logServerStats()
+		case <-s.shutdownCh:
+			s.log.Info("Statistics routine shutting down")
+			return
 		}
 	}
 }
 
-// logServerStats logs statistics about the server
+// logServerStats logs information about active tunnels and connections
 func (s *Server) logServerStats() {
-	// Count active tunnels
 	s.tunnels.mu.RLock()
 	tunnelCount := len(s.tunnels.tunnels)
 	s.tunnels.mu.RUnlock()
 
-	// Log statistics
+	s.wsManager.mu.RLock()
+	wsConnCount := len(s.wsManager.tunnels)
+	s.wsManager.mu.RUnlock()
+
 	s.log.WithFields(logrus.Fields{
-		"active_tunnels": tunnelCount,
-		// Add more statistics as needed
+		"active_tunnels":           tunnelCount,
+		"active_websocket_tunnels": wsConnCount,
 	}).Info("Server statistics")
 }

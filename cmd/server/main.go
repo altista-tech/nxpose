@@ -6,11 +6,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"nxpose/internal/config"
 	"nxpose/internal/crypto"
 	"nxpose/internal/logger"
 	"nxpose/internal/server"
+	"nxpose/yaml_utils"
+
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -40,6 +42,13 @@ func main() {
 
 			// Initialize logger
 			log = logger.New(cfg.Verbose)
+
+			if configFile == "" {
+				log.Info("No config file specified, using environment variables and defaults")
+			} else {
+				log.Info("Configuration loaded from file: " + configFile)
+			}
+
 			log.Debug("Server configuration loaded successfully")
 		},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -47,6 +56,57 @@ func main() {
 			runServer()
 		},
 	}
+
+	// Add check-yaml command for debugging configuration
+	checkYamlCmd := &cobra.Command{
+		Use:   "check-yaml",
+		Short: "Check YAML config file parsing",
+		Run: func(cmd *cobra.Command, args []string) {
+			if configFile == "" {
+				fmt.Println("Error: No config file specified")
+				return
+			}
+			fmt.Printf("===== CHECKING YAML FILE: %s =====\n", configFile)
+			fmt.Println("\n=== GENERIC YAML PARSING ===")
+			yaml_utils.CheckYAMLFile(configFile)
+			fmt.Println("\n=== DIRECT OAUTH2 PARSING ===")
+			yaml_utils.DirectUnmarshalOAuth2(configFile)
+			fmt.Println("\n=== END OF CHECK ===")
+		},
+	}
+	rootCmd.AddCommand(checkYamlCmd)
+
+	// Add validate-github command
+	validateGitHubCmd := &cobra.Command{
+		Use:   "validate-github",
+		Short: "Validate GitHub OAuth credentials in config",
+		Run: func(cmd *cobra.Command, args []string) {
+			if configFile == "" {
+				fmt.Println("Error: No config file specified")
+				return
+			}
+			fmt.Printf("Validating GitHub credentials in: %s\n", configFile)
+			yaml_utils.ValidateGitHubCredentials(configFile)
+		},
+	}
+	rootCmd.AddCommand(validateGitHubCmd)
+
+	// Add fix-yaml command
+	fixYamlCmd := &cobra.Command{
+		Use:   "fix-yaml",
+		Short: "Fix YAML config file structure",
+		Run: func(cmd *cobra.Command, args []string) {
+			if configFile == "" {
+				fmt.Println("Error: No config file specified")
+				return
+			}
+
+			outputFile := configFile + ".fixed"
+			fmt.Printf("Fixing YAML file: %s -> %s\n", configFile, outputFile)
+			yaml_utils.FixYAMLFile(configFile, outputFile)
+		},
+	}
+	rootCmd.AddCommand(fixYamlCmd)
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file (default is $HOME/.nxpose/server-config.yaml)")

@@ -23,8 +23,6 @@ RUN apk --no-cache add ca-certificates tzdata
 # Copy the binary from the builder stage
 COPY --from=builder /app/nxpose-server /app/
 
-# Copy config files
-COPY server-config.example.yaml /app/server-config.yaml
 
 # Create directories for certificates
 RUN mkdir -p /app/certs /app/certificates
@@ -42,4 +40,4 @@ RUN chown -R nxpose:nxpose /app
 USER nxpose
 
 # Command to run when container starts
-CMD ["/app/nxpose-server", "--config", "/app/server-config.yaml"]
+CMD ["/app/nxpose-server" ]

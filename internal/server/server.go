@@ -1,14 +1,9 @@
-// internal/server/server.go
-
 package server
 
 import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"golang.org/x/net/context"
-	"golang.org/x/net/websocket"
 	"math/rand"
 	"net/http"
 	"nxpose/internal/crypto"
@@ -18,9 +13,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
+	"golang.org/x/net/context"
+	"golang.org/x/net/websocket"
+
 	"nxpose/internal/config"
 	"nxpose/internal/logger"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Tunnel represents an active tunnel
@@ -54,13 +56,51 @@ type Server struct {
 	tunnels            *TunnelRegistry
 	certificateManager *crypto.CertificateManager
 
-	mu       sync.Mutex
-	stopping bool
+	// New fields for authentication
+	router       *mux.Router
+	sessionStore sessions.Store
+	mongo        *MongoClient
+	authService  *OAuthService
+
+	mu         sync.Mutex
+	stopping   bool
+	shutdownCh chan struct{}
 }
 
 // NewServer creates a new server instance
 func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.Logger) (*Server, error) {
-	return &Server{
+	// Create the router
+	router := mux.NewRouter()
+
+	// Create a session store
+	var sessionStore sessions.Store
+	// If a session key is provided, use a secure cookie store
+	if config.OAuth2.SessionKey != "" {
+		sessionStore = sessions.NewCookieStore([]byte(config.OAuth2.SessionKey))
+	} else {
+		// Otherwise, use an insecure cookie store (for development)
+		sessionStore = sessions.NewCookieStore([]byte("nxpose-insecure-session-key"))
+	}
+
+	// Create a MongoDB client if MongoDB is enabled
+	var mongo *MongoClient
+	if config.MongoDB.Enabled {
+		var err error
+		mongoConfig := MongoConfig{
+			URI:      config.MongoDB.URI,
+			Database: config.MongoDB.Database,
+			Timeout:  config.MongoDB.Timeout,
+		}
+
+		mongo, err = NewMongoClient(mongoConfig)
+		if err != nil {
+			log.WithError(err).Error("Failed to connect to MongoDB")
+		} else {
+			log.Info("Connected to MongoDB")
+		}
+	}
+
+	server := &Server{
 		config:    config,
 		tlsConfig: tlsConfig,
 		log:       log,
@@ -68,23 +108,126 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 		tunnels: &TunnelRegistry{
 			tunnels: make(map[string]*Tunnel),
 		},
-	}, nil
+		router:       router,
+		sessionStore: sessionStore,
+		mongo:        mongo,
+		shutdownCh:   make(chan struct{}),
+	}
+
+	// Create the auth service if OAuth2 is enabled
+	if config.OAuth2.Enabled {
+		baseURL := fmt.Sprintf("https://%s:%d", config.BaseDomain, config.Port)
+
+		// Log the base URL and redirect URL for debugging
+		log.Infof("Auth base URL: %s", baseURL)
+		log.Infof("Auth redirect URL from config: %s", config.OAuth2.RedirectURL)
+
+		// If the config redirect URL points to /auth/callback but the GitHub callback
+		// actually goes to /github/callback, we need to adjust our baseURL
+		if strings.Contains(config.OAuth2.RedirectURL, "/auth/callback") {
+			log.Infof("Adjusting OAuth2 configuration for GitHub compatibility")
+		}
+
+		// Create auth config from server config
+		authConfig := OAuthConfig{
+			Enabled:        config.OAuth2.Enabled,
+			RedirectURL:    config.OAuth2.RedirectURL,
+			SessionKey:     config.OAuth2.SessionKey,
+			TokenDuration:  5 * time.Minute, // Default values
+			CookieDuration: 24 * time.Hour,  // Default values
+			Providers:      make([]ProviderConfig, len(config.OAuth2.Providers)),
+		}
+
+		// Convert provider configurations
+		for i, p := range config.OAuth2.Providers {
+			authConfig.Providers[i] = ProviderConfig{
+				Name:         p.Name,
+				ClientID:     p.ClientID,
+				ClientSecret: p.ClientSecret,
+				Scopes:       p.Scopes,
+			}
+		}
+
+		// Validate OAuth configuration
+		if config.OAuth2.Enabled {
+			validationResult := ValidateOAuthConfig(authConfig, log.Logger)
+			if !validationResult["valid"].(bool) {
+				log.Warnf("OAuth2 configuration issues: %v", validationResult["issues"])
+			} else {
+				log.Debug("OAuth2 configuration is valid")
+			}
+		}
+
+		// Initialize the auth service
+		authService, err := NewOAuthService(authConfig, log.Logger, baseURL, mongo)
+		if err != nil {
+			log.WithError(err).Error("Failed to initialize auth service")
+		} else {
+			server.authService = authService
+
+			// Register auth routes
+			authService.RegisterRoutes(router)
+
+			log.Info("OAuth2 authentication service initialized")
+		}
+	}
+
+	return server, nil
 }
 
 // extractSubdomain extracts the subdomain from a hostname
-func extractSubdomain(hostname, baseDomain string) string {
+func (s *Server) extractSubdomain(hostname, baseDomain string) string {
+	// Add logging to help with debugging
+	s.log.WithFields(logrus.Fields{
+		"hostname":   hostname,
+		"baseDomain": baseDomain,
+	}).Debug("Extracting subdomain")
+
 	// Remove potential port information
 	if idx := strings.Index(hostname, ":"); idx != -1 {
 		hostname = hostname[:idx]
+		s.log.WithField("hostname_without_port", hostname).Debug("Removed port from hostname")
+	}
+
+	// Check if hostname exactly equals baseDomain (main domain case, no subdomain)
+	if hostname == baseDomain {
+		s.log.WithFields(logrus.Fields{
+			"hostname":   hostname,
+			"baseDomain": baseDomain,
+		}).Debug("Hostname is exactly the base domain (no subdomain)")
+		return ""
 	}
 
 	// Check if hostname ends with baseDomain
 	if !strings.HasSuffix(hostname, baseDomain) {
+		s.log.WithFields(logrus.Fields{
+			"hostname":   hostname,
+			"baseDomain": baseDomain,
+		}).Debug("Hostname does not end with base domain")
 		return ""
 	}
 
-	// Remove the baseDomain part from hostname
-	subdomain := hostname[:len(hostname)-len(baseDomain)-1] // -1 for the dot
+	// Calculate the subdomain part length safely
+	subdomainLength := len(hostname) - len(baseDomain) - 1 // -1 for the dot
+
+	// Check if the subdomain length is valid
+	if subdomainLength <= 0 {
+		s.log.WithFields(logrus.Fields{
+			"hostname":        hostname,
+			"baseDomain":      baseDomain,
+			"subdomainLength": subdomainLength,
+		}).Debug("Invalid subdomain length")
+		return ""
+	}
+
+	// Extract the subdomain part
+	subdomain := hostname[:subdomainLength]
+
+	s.log.WithFields(logrus.Fields{
+		"hostname":   hostname,
+		"baseDomain": baseDomain,
+		"subdomain":  subdomain,
+	}).Debug("Successfully extracted subdomain")
 
 	return subdomain
 }
@@ -115,6 +258,18 @@ func (s *Server) handleWelcomePage(w http.ResponseWriter, r *http.Request) {
             padding: 15px;
             margin-bottom: 20px;
         }
+        .button {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .button:hover {
+            background-color: #0069d9;
+        }
     </style>
 </head>
 <body>
@@ -127,6 +282,19 @@ func (s *Server) handleWelcomePage(w http.ResponseWriter, r *http.Request) {
     <p>Install the nxpose client and run:</p>
     <pre>nxpose register
 nxpose expose http 3000</pre>
+`
+
+	// If OAuth2 is enabled, add a register button
+	if s.config.OAuth2.Enabled && s.authService != nil {
+		welcomeHTML += `
+    <div>
+        <a href="/auth/google/login" class="button google">Sign in with Google</a>
+        <a href="/auth/github/login" class="button github">Sign in with GitHub</a>
+    </div>
+`
+	}
+
+	welcomeHTML += `
 </body>
 </html>
 `
@@ -137,7 +305,7 @@ nxpose expose http 3000</pre>
 func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 	// Extract subdomain from hostname
 	host := r.Host
-	subdomain := extractSubdomain(host, s.config.BaseDomain)
+	subdomain := s.extractSubdomain(host, s.config.BaseDomain)
 
 	s.log.WithFields(logrus.Fields{
 		"host":      host,
@@ -468,32 +636,30 @@ func (s *Server) Start() error {
 	// Now proceed with HTTP server setup
 	s.log.Info("Setting up HTTP servers...")
 
-	// Set up HTTP server
-	mux := http.NewServeMux()
-
+	// Set up router instead of a basic mux
 	// API handlers
-	mux.HandleFunc("/api/register", s.handleRegister)
-	mux.HandleFunc("/api/tunnel", s.handleTunnel)
-	mux.HandleFunc("/api/ws", s.handleWebSocket)
-	mux.HandleFunc("/api/status", s.handleStatus)
+	s.router.HandleFunc("/api/register", s.handleRegister)
+	s.router.HandleFunc("/api/tunnel", s.handleTunnel)
+	s.router.HandleFunc("/api/ws", s.handleWebSocket)
+	s.router.HandleFunc("/api/status", s.handleStatus)
 
 	// Default handler for tunnel requests
-	mux.HandleFunc("/", s.handleTunnelRequest)
+	s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
 
 	// Create HTTPS server for API
 	s.httpServer = &http.Server{
 		Addr:      fmt.Sprintf("%s:%d", s.config.BindAddress, s.config.Port),
-		Handler:   mux,
+		Handler:   s.router,
 		TLSConfig: s.tlsConfig,
 	}
 
 	// If Let's Encrypt is not enabled, create dedicated HTTP server for tunnel traffic
 	if !s.config.LetsEncrypt.Enabled {
-		tunnelMux := http.NewServeMux()
-		tunnelMux.HandleFunc("/", s.handleTunnelRequest) // Only handle tunnel requests
+		tunnelRouter := mux.NewRouter()
+		tunnelRouter.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest)) // Only handle tunnel requests
 		s.tunnelServer = &http.Server{
 			Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
-			Handler: tunnelMux,
+			Handler: tunnelRouter,
 		}
 	} else {
 		// When Let's Encrypt is enabled, we use the acmeHTTPServer that was created
@@ -503,20 +669,23 @@ func (s *Server) Start() error {
 		// initCertificateManager if Let's Encrypt was properly initialized
 		if s.acmeHTTPServer == nil {
 			s.log.Warn("Let's Encrypt HTTP server not initialized, creating a basic HTTP server")
+			acmeRouter := mux.NewRouter()
 			s.acmeHTTPServer = &http.Server{
 				Addr:    fmt.Sprintf("%s:80", s.config.BindAddress),
-				Handler: http.NewServeMux(),
+				Handler: acmeRouter,
 			}
 		}
 
-		// Add the tunnel request handler to the ACME mux
-		// Get the mux from the ACME HTTP server
-		acmeMux, ok := s.acmeHTTPServer.Handler.(*http.ServeMux)
+		// Add the tunnel request handler to the ACME router
+		acmeRouter, ok := s.acmeHTTPServer.Handler.(*mux.Router)
 		if ok {
 			// Add tunnel request handler
-			acmeMux.HandleFunc("/", s.handleTunnelRequest)
+			acmeRouter.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
 		} else {
-			return fmt.Errorf("failed to add tunnel handler to ACME HTTP server")
+			// If the handler is not a mux.Router, create a new one
+			acmeRouter := mux.NewRouter()
+			acmeRouter.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
+			s.acmeHTTPServer.Handler = acmeRouter
 		}
 
 		// The ACME server is already using port 80, so we don't need a separate tunnel server
@@ -554,6 +723,9 @@ func (s *Server) Stop() error {
 	s.stopping = true
 	s.mu.Unlock()
 
+	// Signal shutdown to background goroutines
+	close(s.shutdownCh)
+
 	// Create context with 15s timeout for graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -583,6 +755,13 @@ func (s *Server) Stop() error {
 		s.log.Info("Stopping certificate manager")
 		if err := s.certificateManager.Stop(); err != nil {
 			s.log.Errorf("Error stopping certificate manager: %v", err)
+		}
+	}
+
+	// Close MongoDB client if it exists
+	if s.mongo != nil {
+		if err := s.mongo.Close(); err != nil {
+			s.log.WithError(err).Error("Error closing MongoDB connection")
 		}
 	}
 
@@ -625,52 +804,113 @@ type TunnelResponse struct {
 
 // handleRegister handles client registration requests
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	// Only accept POST requests
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// If OAuth2 is enabled, show a simple page with links to OAuth providers
+	if s.config.OAuth2.Enabled && s.authService != nil {
+		// Display a page with OAuth provider options
+		w.Header().Set("Content-Type", "text/html")
+		html := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NXpose - Register with OAuth</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .provider-button {
+            display: inline-block;
+            padding: 12px 24px;
+            margin: 10px;
+            border-radius: 4px;
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        .google {
+            background-color: #DB4437;
+        }
+        .google:hover {
+            background-color: #C1351D;
+        }
+        .github {
+            background-color: #333;
+        }
+        .github:hover {
+            background-color: #000;
+        }
+        .info {
+            margin-top: 30px;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Register with NXpose</h1>
+    <p>Choose a provider to authenticate and register your client:</p>
+    
+    <div>
+        <a href="/auth/google/login" class="provider-button google">Sign in with Google</a>
+        <a href="/auth/github/login" class="provider-button github">Sign in with GitHub</a>
+    </div>
+    
+    <div class="info">
+        <p>After authenticating, a secure certificate will be generated for your client.</p>
+    </div>
+</body>
+</html>
+`
+		w.Write([]byte(html))
 		return
 	}
 
-	// Parse request body
-	var reqBody RegistrationRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+	// Legacy registration logic (for backward compatibility)
+	// Parse the JSON request body
+	var request RegistrationRequest
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Generate client ID
+	// Generate a new client ID
 	clientID := uuid.New().String()
 
-	// Generate or sign client certificate
-	// In a real implementation, this would use crypto.SignClientCertificate
-	// or similar to create a proper client certificate
-	certPEM, err := crypto.GenerateDummyClientCertificate()
+	// Generate a certificate for the client (in a real implementation, this would be signed by the server's CA)
+	tlsConfig, err := crypto.GenerateSelfSignedCert()
 	if err != nil {
-		s.log.WithError(err).Error("Failed to generate client certificate")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		s.log.WithError(err).Error("Failed to generate certificate")
+		http.Error(w, "Failed to generate certificate", http.StatusInternalServerError)
 		return
 	}
 
-	// Certificate expiration (30 days from now)
-	expiresAt := time.Now().Add(30 * 24 * time.Hour)
-
-	// Create response
-	resp := RegistrationResponse{
-		Success:     true,
-		ClientID:    clientID,
-		Certificate: string(certPEM),
-		ExpiresAt:   expiresAt,
-	}
-
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-
+	// In a real implementation, we would store the client information in a database
 	s.log.WithFields(logrus.Fields{
 		"client_id":   clientID,
-		"client_name": reqBody.ClientName,
-	}).Info("Client registered successfully")
+		"client_name": request.ClientName,
+	}).Info("New client registered")
+
+	// Create the response
+	response := RegistrationResponse{
+		Success:     true,
+		Message:     "Registration successful",
+		ClientID:    clientID,
+		Certificate: string(tlsConfig.Certificate),
+		ExpiresAt:   time.Now().Add(365 * 24 * time.Hour), // Certificate validity: 1 year
+	}
+
+	// Send the response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleTunnel handles tunnel creation requests
@@ -784,24 +1024,49 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Get client ID from query parameters
 	clientID := r.URL.Query().Get("client_id")
-	tunnelID := r.URL.Query().Get("tunnel_id") // Make sure you're getting this
+	tunnelID := r.URL.Query().Get("tunnel_id")
 
 	if clientID == "" {
+		s.log.WithField("remote_addr", r.RemoteAddr).Error("Missing client ID in WebSocket request")
 		http.Error(w, "Missing client ID", http.StatusBadRequest)
 		return
 	}
 
-	// Debug the headers and parameters
+	// Detailed connection logging
 	s.log.WithFields(logrus.Fields{
-		"client_id": clientID,
-		"tunnel_id": tunnelID,
-		"headers":   r.Header,
-	}).Debug("WebSocket connection attempt")
+		"client_id":   clientID,
+		"tunnel_id":   tunnelID,
+		"remote_addr": r.RemoteAddr,
+		"user_agent":  r.UserAgent(),
+		"headers":     r.Header,
+		"host":        r.Host,
+		"uri":         r.RequestURI,
+		"proto":       r.Proto,
+	}).Info("WebSocket connection attempt")
 
-	// Upgrade to WebSocket
-	websocket.Handler(func(ws *websocket.Conn) {
+	// Add CORS headers for WebSocket connections
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Nxpose-Client-ID, X-Nxpose-Tunnel-ID")
+
+	// Handle preflight requests
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Upgrade the connection with detailed error handling
+	wsHandler := websocket.Handler(func(ws *websocket.Conn) {
+		s.log.WithFields(logrus.Fields{
+			"client_id":   clientID,
+			"remote_addr": r.RemoteAddr,
+		}).Info("WebSocket connection established successfully")
+
 		s.handleWebSocketConnection(ws, clientID)
-	}).ServeHTTP(w, r)
+	})
+
+	// Handle the WebSocket connection
+	wsHandler.ServeHTTP(w, r)
 }
 
 // generateRandomSubdomain generates a random subdomain of the specified length
@@ -826,6 +1091,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime":  time.Since(time.Now()).String(), // Just a placeholder - real impl would use server start time
 		"tunnels": len(s.tunnels.tunnels),
 	}
+
+	// Add features information
+	features := map[string]interface{}{
+		"oauth2_enabled":      s.config.OAuth2.Enabled,
+		"mongodb_enabled":     s.config.MongoDB.Enabled,
+		"letsencrypt_enabled": s.config.LetsEncrypt.Enabled,
+	}
+	status["features"] = features
 
 	// Add TLS configuration information
 	tlsInfo := map[string]interface{}{

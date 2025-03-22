@@ -13,7 +13,8 @@ server:
   # Base domain for tunnels
   # This domain should be configured in your DNS to point to this server
   # All subdomain tunnels will be created under this domain
-  domain: "nxpose.naxrevlis.com"
+  domain: "example.com"
+
 # TLS settings
 tls:
   # Path to TLS certificate file
@@ -31,6 +32,54 @@ tls:
   # cipher_suites:
   #   - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
   #   - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+
+# OAuth2 configuration for user authentication
+oauth2:
+  # Enable OAuth2 authentication
+  enabled: true
+
+  # Redirect URL for OAuth callbacks
+  # Should match your server domain
+  redirect_url: "https://nxpose.naxrevlis.com/auth/callback"
+
+  # Session key for cookie encryption (generate a random string)
+  session_key: "change-this-to-a-random-secret-key"
+
+  # Session store options
+  token_duration: "5m"    # JWT token duration
+  cookie_duration: "24h"  # Cookie duration
+
+  # OAuth providers - configure at least one provider
+  providers:
+    # # Google OAuth configuration
+    # - name: "google"
+    #   client_id: "your-google-client-id"
+    #   client_secret: "your-google-client-secret"
+    #   scopes:
+    #     - "https://www.googleapis.com/auth/userinfo.email"
+    #     - "https://www.googleapis.com/auth/userinfo.profile"
+
+    # GitHub OAuth configuration
+    - name: "github"
+      client_id: "github-client-id"
+      client_secret: "github-client-secret"
+      scopes:
+        - "user:email"
+        - "read:user"
+
+# MongoDB configuration for user storage
+mongodb:
+  # Enable MongoDB storage
+  enabled: true
+
+  # MongoDB connection URI
+  uri: "mongodb://localhost:27017"
+
+  # Database name
+  database: "nxpose"
+
+  # Connection timeout
+  timeout: "10s"
 
 # Let's Encrypt settings for automatic TLS certificates
 letsencrypt:

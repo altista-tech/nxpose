@@ -304,13 +304,41 @@ func (tm *TunnelManager) CreateTunnel(protocol string, localPort int, serverHost
 		stopChan:      make(chan struct{}),
 	}
 
-	// Try to expose the service - updated to handle new return values
-	publicURL, tunnelID, err := ExposeLocalService(protocol, localPort, certData, serverHost, serverPort)
+	// Try to expose the service with retries
+	maxRetries := 3
+	var publicURL, tunnelID string
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		tm.log.Infof("Attempting to expose local service (attempt %d/%d)...", i+1, maxRetries)
+
+		publicURL, tunnelID, err = ExposeLocalService(protocol, localPort, certData, serverHost, serverPort)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		tm.log.Warnf("Failed to expose service (attempt %d/%d): %v", i+1, maxRetries, err)
+
+		if i < maxRetries-1 {
+			// Wait before retrying with exponential backoff
+			backoff := time.Duration((i+1)*(i+1)) * time.Second
+			tm.log.Infof("Retrying in %v...", backoff)
+			time.Sleep(backoff)
+		}
+	}
+
+	// If all retries failed
 	if err != nil {
-		return nil, fmt.Errorf("failed to expose local service: %w", err)
+		return nil, fmt.Errorf("failed to expose local service after %d attempts: %w", maxRetries, err)
+	}
+
+	// Validate the response
+	if tunnelID == "" || publicURL == "" {
+		return nil, fmt.Errorf("server returned invalid tunnel data: missing tunnel ID or public URL")
 	}
 
 	// Update with server-provided ID and URL
+	tm.log.Infof("Successfully created tunnel with ID %s and URL %s", tunnelID, publicURL)
 	managedTunnel.ID = tunnelID // Use the server-provided tunnelID
 	managedTunnel.PublicURL = publicURL
 	tm.tunnels[tunnelID] = managedTunnel // Store with tunnelID from server

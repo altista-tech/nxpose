@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nxpose-server
+    container_name: nxpose-server
+    ports:
+      - "8443:8443"
+    environment:
+      - NXPOSE_SERVER_BIND_ADDRESS=0.0.0.0
+      - NXPOSE_SERVER_PORT=8443
+      - NXPOSE_SERVER_DOMAIN=nxpose.example.com
+      - NXPOSE_VERBOSE=true
+      # Uncomment the following if you have TLS certificates
+      # - NXPOSE_TLS_CERT=/certs/server.crt
+      # - NXPOSE_TLS_KEY=/certs/server.key
+    volumes:
+      # Optional: Mount certificates if needed
+      # - ./certs:/certs
+      # Mount persistent storage for tunnel data
+      - ./data:/data
+    restart: unless-stopped
+    command: ["nxpose-server"] 

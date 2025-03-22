@@ -1,18 +1,26 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"nxpose/internal/config"
 	"nxpose/internal/crypto"
 	"nxpose/internal/logger"
@@ -110,6 +118,7 @@ func getServerStatus(serverHost string, serverPort int) (map[string]interface{},
 
 func createExposeCommand() *cobra.Command {
 	var keepAlive bool
+	var skipLocalCheck bool
 
 	cmd := &cobra.Command{
 		Use:   "expose [protocol] [port]",
@@ -129,11 +138,13 @@ func createExposeCommand() *cobra.Command {
 			// Update config with command line arguments
 			cfg.Protocol = protocol
 			cfg.LocalPort = port
+			cfg.SkipLocalCheck = skipLocalCheck
 
 			log.WithFields(map[string]interface{}{
-				"protocol": protocol,
-				"port":     port,
-				"server":   cfg.ServerHost,
+				"protocol":         protocol,
+				"port":             port,
+				"server":           cfg.ServerHost,
+				"skip_local_check": skipLocalCheck,
 			}).Info("Exposing local service")
 
 			// Check if we have certificate data
@@ -162,7 +173,7 @@ func createExposeCommand() *cobra.Command {
 			fmt.Printf("Local service exposed successfully at: %s\n", publicURL)
 
 			// Start the tunnel with the server-provided tunnel ID
-			if err := tunnel.StartTunnel(protocol, port, publicURL, tunnelID, cfg.CertData); err != nil {
+			if err := tunnel.StartTunnel(protocol, port, publicURL, tunnelID, cfg.CertData, skipLocalCheck); err != nil {
 				log.WithError(err).Error("Failed to start tunnel")
 				fmt.Fprintf(os.Stderr, "Error: Failed to start tunnel: %v\n", err)
 				os.Exit(1)
@@ -188,6 +199,7 @@ func createExposeCommand() *cobra.Command {
 
 	// Expose-specific flags
 	cmd.Flags().BoolVar(&keepAlive, "keep-alive", false, "Keep the tunnel running until interrupted")
+	cmd.Flags().BoolVar(&skipLocalCheck, "skip-local-check", false, "Skip checking if the local service is available before creating the tunnel")
 
 	return cmd
 }
@@ -196,73 +208,238 @@ func createExposeCommand() *cobra.Command {
 func createRegisterCommand() *cobra.Command {
 	var saveConfig bool
 	var saveCert bool
-	var forceNewCert bool // New flag to force certificate regeneration
+	var forceNewCert bool // Flag to force certificate regeneration
+	var skipOAuth bool    // Flag to explicitly skip OAuth when it's enabled on the server
 
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register with the nxpose server and obtain certificates",
-		Long:  `Connect to the nxpose server to register and obtain the necessary certificates for secure tunneling.`,
+		Long: `Connect to the nxpose server to register and obtain the necessary certificates for secure tunneling.
+
+By default, OAuth2 authentication will be used if the server supports it.
+To bypass OAuth authentication (not recommended), use the --skip-oauth flag.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Log connection attempt
 			log.WithField("server", fmt.Sprintf("%s:%d", cfg.ServerHost, cfg.ServerPort)).
 				Info("Connecting to server")
 
-			// Call the RegisterWithServer function to get a certificate
-			// Now passing the forceNewCert flag
-			certificate, err := crypto.RegisterWithServer(cfg.ServerHost, cfg.ServerPort, forceNewCert)
-			if err != nil {
-				log.WithError(err).Error("Failed to register with server")
-				fmt.Fprintf(os.Stderr, "Error: Failed to register with server: %v\n", err)
-				os.Exit(1)
-			}
+			var certificate string
+			var err error
 
-			// Store certificate in config if successful
-			// In the "register" command handler
-			if certificate != "" {
-				log.Info("Successfully registered with server and obtained certificate")
-
-				// Store the certificate data in the config
-				cfg.CertData = []byte(certificate)
-
-				// Display success message with certificate snippet
-				fmt.Println("Successfully registered with server")
-				fmt.Println("Certificate snippet:")
-
-				// Print just the first line of the certificate for brevity
-				certLines := strings.Split(certificate, "\n")
-				if len(certLines) > 0 {
-					fmt.Println(certLines[0] + "...")
+			// Use OAuth by default unless explicitly disabled with skipOAuth flag
+			if !skipOAuth {
+				// Check if server supports OAuth
+				if crypto.CheckOAuthSupport(cfg.ServerHost, cfg.ServerPort) {
+					// OAuth2 flow for registration
+					certificate, err = registerWithOAuth(cfg.ServerHost, cfg.ServerPort, forceNewCert)
+					if err != nil {
+						log.WithError(err).Error("Failed to register with server using OAuth")
+						fmt.Fprintf(os.Stderr, "Error: Failed to register with server using OAuth: %v\n", err)
+						os.Exit(1)
+					}
+				} else {
+					// Server doesn't support OAuth, so we can't proceed
+					log.Error("Server does not support OAuth authentication, and OAuth is required")
+					fmt.Fprintln(os.Stderr, "Error: Server does not support OAuth authentication.")
+					fmt.Fprintln(os.Stderr, "OAuth authentication is required for secure registration.")
+					fmt.Fprintln(os.Stderr, "Please ensure the server has OAuth configured properly.")
+					os.Exit(1)
 				}
-
-				// Always save certificate to file - no need for a flag
-				err := config.SaveCertificateData([]byte(certificate), "")
+			} else {
+				// Only use traditional registration if OAuth is explicitly skipped
+				fmt.Println("Warning: Skipping OAuth authentication as requested.")
+				fmt.Println("This is not recommended for production use.")
+				certificate, err = crypto.RegisterWithServer(cfg.ServerHost, cfg.ServerPort, forceNewCert)
 				if err != nil {
-					log.WithError(err).Error("Failed to save certificate")
-					fmt.Fprintf(os.Stderr, "Error: Failed to save certificate: %v\n", err)
-				} else {
-					log.Info("Certificate saved to file")
-					fmt.Println("Certificate saved successfully")
+					log.WithError(err).Error("Failed to register with server")
+					fmt.Fprintf(os.Stderr, "Error: Failed to register with server: %v\n", err)
+					os.Exit(1)
 				}
 			}
 
-			// If save config flag is set, save the configuration
-			if saveConfig {
-				if err := config.SaveConfig(cfg, ""); err != nil {
-					log.WithError(err).Error("Failed to save configuration")
+			log.Info("Successfully registered with server and obtained certificate")
+			fmt.Println("Successfully registered with server")
+			fmt.Println("Certificate snippet:")
+			fmt.Println(certificate[:40] + "...")
+
+			// Save certificate to file
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				// Create .nxpose directory if it doesn't exist
+				configDir := filepath.Join(homeDir, ".nxpose")
+				if err := os.MkdirAll(configDir, 0755); err != nil {
+					fmt.Printf("Warning: Could not create config directory: %v\n", err)
 				} else {
-					log.Info("Configuration saved successfully")
-					fmt.Println("Configuration saved successfully")
+					certPath := filepath.Join(configDir, "client.crt")
+					if err := os.WriteFile(certPath, []byte(certificate), 0644); err != nil {
+						fmt.Printf("Warning: Could not save certificate: %v\n", err)
+					} else {
+						log.Info("Certificate saved to file")
+						fmt.Println("Certificate saved successfully")
+					}
 				}
 			}
+
+			// Also update the config in memory for future commands in this session
+			config.StoreCertificate(certificate)
 		},
 	}
 
 	// Register-specific flags
-	cmd.Flags().BoolVar(&saveConfig, "save-config", false, "Save configuration after registration")
-	cmd.Flags().BoolVar(&saveCert, "save-cert", false, "Save certificate to file after registration")
-	cmd.Flags().BoolVar(&forceNewCert, "force-new-cert", false, "Force generation of a new certificate even if one exists")
+	cmd.Flags().BoolVar(&saveConfig, "save-config", true, "Save registration information to config file")
+	cmd.Flags().BoolVar(&saveCert, "save-cert", true, "Save certificate and key to disk")
+	cmd.Flags().BoolVar(&forceNewCert, "force-new", false, "Force registration of a new certificate even if one exists")
+	cmd.Flags().BoolVar(&skipOAuth, "skip-oauth", false, "Skip OAuth authentication (not recommended)")
 
 	return cmd
+}
+
+// registerWithOAuth performs registration using OAuth2
+func registerWithOAuth(host string, port int, forceNewCert bool) (string, error) {
+	// For authentication URLs, use clean domain without port for standard HTTPS port
+	var authURL string
+	if port == 443 {
+		// Don't include port 443 in the URL as it's the default HTTPS port
+		authURL = fmt.Sprintf("https://%s/auth/register", host)
+	} else {
+		authURL = fmt.Sprintf("https://%s:%d/auth/register", host, port)
+	}
+
+	// Log the URL we're about to open
+	log.WithField("url", authURL).Info("Opening OAuth registration URL in browser")
+
+	// Generate a local state token for security
+	stateToken := fmt.Sprintf("%x", rand.Int63())
+
+	// Start a local HTTP server to receive the callback
+	// Use a random available port for the callback server
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return "", fmt.Errorf("failed to start local callback server: %w", err)
+	}
+	defer listener.Close()
+
+	// Get the actual port that was assigned
+	callbackPort := listener.Addr().(*net.TCPAddr).Port
+	callbackURL := fmt.Sprintf("http://localhost:%d/callback", callbackPort)
+
+	// Store the certificate from the callback
+	var certificate string
+	var callbackErr error
+	callbackDone := make(chan bool)
+
+	// Set up a simple HTTP server to handle the callback
+	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		log.Infof("Received callback: %s", r.URL.String())
+
+		// Check state token to prevent CSRF
+		receivedState := r.URL.Query().Get("state")
+		if receivedState != stateToken {
+			log.Errorf("Invalid state token in callback. Expected: %s, Got: %s", stateToken, receivedState)
+			callbackErr = fmt.Errorf("invalid state token in callback")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error: Invalid state token. Authentication failed.")
+			callbackDone <- true
+			return
+		}
+
+		// Get the certificate from the callback
+		certData := r.URL.Query().Get("certificate")
+		if certData == "" {
+			log.Info("No certificate data in callback, checking for error message")
+			errMsg := r.URL.Query().Get("error")
+			if errMsg == "" {
+				// Log all query parameters for debugging
+				log.Info("Callback URL parameters:")
+				for key, values := range r.URL.Query() {
+					log.Infof("  %s: %v", key, values)
+				}
+				errMsg = "no certificate data received"
+			}
+			log.WithField("error", errMsg).Error("OAuth registration failed")
+			callbackErr = fmt.Errorf("OAuth registration failed: %s", errMsg)
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error: %s", errMsg)
+			callbackDone <- true
+			return
+		}
+
+		log.Infof("Certificate data received (length: %d characters)", len(certData))
+
+		// Decode the certificate (it's base64 encoded)
+		decodedCert, err := base64.StdEncoding.DecodeString(certData)
+		if err != nil {
+			log.WithError(err).Error("Failed to decode certificate data")
+			callbackErr = fmt.Errorf("failed to decode certificate data: %w", err)
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error decoding certificate data.")
+			callbackDone <- true
+			return
+		}
+
+		log.Infof("Decoded certificate (length: %d bytes)", len(decodedCert))
+
+		// Store the certificate
+		certificate = string(decodedCert)
+
+		// Show success page to user
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Registration successful! You can close this window and return to the nxpose client.")
+
+		log.Info("Registration completed successfully")
+
+		// Signal that the callback processing is complete
+		callbackDone <- true
+	})
+
+	// Open the authentication URL in the browser
+	// Build the full URL with callback and state token
+	fullAuthURL := fmt.Sprintf("%s?callback=%s&state=%s",
+		authURL,
+		url.QueryEscape(callbackURL),
+		stateToken)
+
+	// Open the URL in the default browser
+	log.WithField("url", fullAuthURL).Info("Opening OAuth registration URL")
+	if err := openBrowser(fullAuthURL); err != nil {
+		return "", fmt.Errorf("failed to open browser: %w", err)
+	}
+
+	// Start the callback server
+	go func() {
+		if err := http.Serve(listener, nil); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.WithError(err).Error("Callback server error")
+		}
+	}()
+
+	// Wait for the callback to complete or timeout
+	select {
+	case <-callbackDone:
+		if callbackErr != nil {
+			return "", callbackErr
+		}
+		return certificate, nil
+	case <-time.After(5 * time.Minute):
+		return "", fmt.Errorf("authentication timed out after 5 minutes")
+	}
+}
+
+// openBrowser opens the specified URL in the default browser
+func openBrowser(url string) error {
+	var err error
+
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
+
+	return err
 }
 
 // createStatusCommand creates the 'status' subcommand

@@ -196,6 +196,16 @@ func (t *WebSocketTunnel) handleConnection() {
 			t.handleHTTPResponse(message)
 		case "tcp_data":
 			t.handleTCPData(message)
+		case "ping":
+			// Reply with pong message
+			pongResponse := TunnelMessage{
+				Type:      "pong",
+				RequestID: message.RequestID,
+				TunnelID:  message.TunnelID,
+				Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
+			}
+			t.sendMessage(pongResponse)
+			t.server.log.WithField("request_id", message.RequestID).Debug("Replied to ping with pong")
 		case "pong":
 			// Update last active time (already done above)
 		default:
@@ -424,7 +434,19 @@ func (t *WebSocketTunnel) sendHTTPRequest(request *http.Request) (*HTTPResponse,
 	}
 }
 
-// startPingPong sends periodic ping messages to keep the connection alive
+// sendMessage sends a message over the WebSocket connection
+func (t *WebSocketTunnel) sendMessage(message TunnelMessage) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.Conn == nil || t.closed {
+		return fmt.Errorf("websocket connection is nil or closed")
+	}
+
+	return websocket.JSON.Send(t.Conn, message)
+}
+
+// startPingPong sets up a ping/pong mechanism for connection health monitoring
 func (t *WebSocketTunnel) startPingPong() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -432,46 +454,30 @@ func (t *WebSocketTunnel) startPingPong() {
 	for {
 		select {
 		case <-ticker.C:
+			// Don't send pings if the connection is closed
 			t.mu.Lock()
-			if t.closed {
+			if t.closed || t.Conn == nil {
 				t.mu.Unlock()
 				return
 			}
+			t.mu.Unlock()
 
 			// Send ping message
 			ping := TunnelMessage{
-				Type: "ping",
-				Data: json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
+				Type:      "ping",
+				RequestID: uuid.New().String(),
+				TunnelID:  t.TunnelID,
+				Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
 			}
 
-			err := websocket.JSON.Send(t.Conn, ping)
-			t.mu.Unlock()
-
-			if err != nil {
-				t.server.log.WithError(err).WithField("connection_id", t.ID).Error("Failed to send ping")
-				// Close the connection if ping fails
-				t.Close()
+			if err := t.sendMessage(ping); err != nil {
+				t.server.log.WithError(err).Warn("Failed to send ping")
 				return
 			}
+
+			t.server.log.WithField("connection_id", t.ID).Debug("Sent ping")
 		}
 	}
-}
-
-// sendMessage sends a message over the WebSocket connection
-func (t *WebSocketTunnel) sendMessage(message TunnelMessage) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.closed {
-		return fmt.Errorf("connection closed")
-	}
-
-	if err := websocket.JSON.Send(t.Conn, message); err != nil {
-		t.server.log.WithError(err).WithField("connection_id", t.ID).Error("Failed to send message")
-		return err
-	}
-
-	return nil
 }
 
 // Close closes the WebSocket connection

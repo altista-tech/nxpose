@@ -8,10 +8,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -37,7 +40,7 @@ func RegisterWithServer(host string, port int, forceNewCert bool) (string, error
 	// Either generate new certificate or use existing one
 	if forceNewCert {
 		fmt.Println("Forcing generation of new certificate...")
-		tlsConfig, err = generateSelfSignedCert()
+		tlsConfig, err = GenerateSelfSignedCert()
 	} else {
 		// Try to use existing certificate first
 		tlsConfig, err = createTLSConfig()
@@ -106,11 +109,11 @@ func createTLSConfig() (*TLSConfig, error) {
 
 	// If we couldn't load existing certificates, generate new ones
 	fmt.Println("Generating new self-signed certificate for development...")
-	return generateSelfSignedCert()
+	return GenerateSelfSignedCert()
 }
 
-// generateSelfSignedCert creates a new self-signed certificate for development
-func generateSelfSignedCert() (*TLSConfig, error) {
+// GenerateSelfSignedCert creates a new self-signed certificate for development
+func GenerateSelfSignedCert() (*TLSConfig, error) {
 	// Generate a new private key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -225,9 +228,64 @@ func saveCertificateAndKey(cert, key []byte) {
 
 // fileExists checks if a file exists
 func fileExists(filepath string) bool {
-	info, err := os.Stat(filepath)
-	if os.IsNotExist(err) {
+	_, err := os.Stat(filepath)
+	return err == nil
+}
+
+// CheckOAuthSupport checks if the server supports OAuth
+func CheckOAuthSupport(host string, port int) bool {
+	var serverURL string
+	if port == 443 {
+		// Don't include port 443 in the URL as it's the default HTTPS port
+		serverURL = fmt.Sprintf("https://%s/auth/login", host)
+	} else {
+		serverURL = fmt.Sprintf("https://%s:%d/auth/login", host, port)
+	}
+
+	// Create HTTP client with TLS config that skips verification
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Only for development to allow self-signed certs
+		},
+	}
+	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
+
+	// Send request to check if OAuth registration URL exists
+	resp, err := client.Get(serverURL)
+	if err != nil {
+		// Connection error - server might be unreachable or not supporting HTTPS
+		fmt.Printf("Error connecting to server for OAuth check: %v\n", err)
 		return false
 	}
-	return !info.IsDir()
+	defer resp.Body.Close()
+
+	// Check if we got a response - any response (even 401, 403, or 404) suggests
+	// the server is running and handling requests at that URL
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusBadRequest &&
+		resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusForbidden {
+		fmt.Printf("Server responded with status %d for OAuth check\n", resp.StatusCode)
+		return false
+	}
+
+	// Read part of the response body to check for OAuth-related content
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 8192)) // Read up to 8KB
+	if err != nil {
+		fmt.Printf("Error reading server response for OAuth check: %v\n", err)
+		return false
+	}
+
+	// Convert the response body to lowercase for easier matching
+	bodyText := strings.ToLower(string(bodyBytes))
+
+	// Check if response contains OAuth-related keywords
+	oauthKeywords := []string{"oauth", "auth", "login", "github", "google", "sign in"}
+	for _, keyword := range oauthKeywords {
+		if strings.Contains(bodyText, keyword) {
+			return true
+		}
+	}
+
+	return false
 }

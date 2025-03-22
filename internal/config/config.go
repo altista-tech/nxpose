@@ -15,9 +15,10 @@ type Config struct {
 	ServerPort int
 
 	// Client related
-	LocalPort   int
-	Protocol    string
-	SubdomainID string
+	LocalPort      int
+	Protocol       string
+	SubdomainID    string
+	SkipLocalCheck bool
 
 	// Common settings
 	Verbose  bool
@@ -29,15 +30,16 @@ type Config struct {
 // DefaultConfig returns a config with default values
 func DefaultConfig() *Config {
 	return &Config{
-		ServerHost:  "localhost",
-		ServerPort:  8080,
-		LocalPort:   3000,
-		Protocol:    "http",
-		SubdomainID: "",
-		Verbose:     false,
-		TLSCert:     "",
-		TLSKey:      "",
-		CertData:    nil,
+		ServerHost:     "nxpose.naxrevlis.com",
+		ServerPort:     443,
+		LocalPort:      3000,
+		Protocol:       "https",
+		SubdomainID:    "",
+		SkipLocalCheck: false,
+		Verbose:        false,
+		TLSCert:        "",
+		TLSKey:         "",
+		CertData:       nil,
 	}
 }
 
@@ -69,10 +71,26 @@ func LoadConfig(configFile string) (*Config, error) {
 	viper.SetEnvPrefix("NXPOSE")
 	viper.AutomaticEnv()
 
-	// Try to read config from file (doesn't error if file doesn't exist)
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("error reading config file: %w", err)
+	// Try to read config from file
+	configReadError := viper.ReadInConfig()
+	configNotFound := false
+
+	if configReadError != nil {
+		if _, ok := configReadError.(viper.ConfigFileNotFoundError); ok {
+			configNotFound = true
+		} else {
+			return nil, fmt.Errorf("error reading config file: %w", configReadError)
+		}
+	}
+
+	// If config is not found, create a default one
+	if configNotFound {
+		// Save the default config
+		if err := SaveConfig(config, ""); err != nil {
+			// Just log the error but continue with default config
+			fmt.Fprintf(os.Stderr, "Warning: Could not save default configuration: %v\n", err)
+		} else {
+			fmt.Println("Created default configuration file with server: https://nxpose.naxrevlsi.com:8443")
 		}
 	}
 
@@ -91,6 +109,9 @@ func LoadConfig(configFile string) (*Config, error) {
 	}
 	if viper.IsSet("client.subdomain") {
 		config.SubdomainID = viper.GetString("client.subdomain")
+	}
+	if viper.IsSet("client.skip_local_check") {
+		config.SkipLocalCheck = viper.GetBool("client.skip_local_check")
 	}
 	if viper.IsSet("verbose") {
 		config.Verbose = viper.GetBool("verbose")
@@ -162,6 +183,15 @@ func SaveCertificateData(certData []byte, filePath string) error {
 	}
 
 	return nil
+}
+
+// StoreCertificate stores the certificate string in the global configuration
+func StoreCertificate(certStr string) {
+	// Get the current configuration from the DefaultConfig
+	cfg := DefaultConfig()
+
+	// Store the certificate data
+	cfg.CertData = []byte(certStr)
 }
 
 // LoadCertificateData loads the certificate data from a file

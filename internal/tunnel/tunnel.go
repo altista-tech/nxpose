@@ -10,12 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +41,7 @@ type Tunnel struct {
 	stopCh     chan struct{}
 	log        *logrus.Logger
 	tcpTunnel  *TCPTunnel
+	registered bool
 }
 
 // TunnelMessage represents a message sent over the WebSocket tunnel
@@ -228,7 +228,7 @@ func ExposeLocalService(protocol string, port int, certData []byte, serverHost s
 	return tunnelResp.PublicURL, tunnelResp.TunnelID, nil
 }
 
-func StartTunnel(protocol string, localPort int, publicURL string, tunnelID string, certData []byte) error {
+func StartTunnel(protocol string, localPort int, publicURL string, tunnelID string, certData []byte, skipLocalCheck bool) error {
 	// Parse the public URL
 	parsedURL, err := url.Parse(publicURL)
 	if err != nil {
@@ -284,43 +284,48 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 		tunnel.log.SetLevel(logrus.InfoLevel)
 	}
 
-	// Verify local service is available before starting tunnel
-	localURL := fmt.Sprintf("http://localhost:%d", localPort)
-	localClient := &http.Client{
-		Timeout: 2 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+	// Verify local service is available before starting tunnel, unless skipLocalCheck is true
+	if !skipLocalCheck {
+		localURL := fmt.Sprintf("http://localhost:%d", localPort)
+		localClient := &http.Client{
+			Timeout: 2 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
 			},
-		},
-	}
+		}
 
-	// Try a HEAD request first to minimize data transfer
-	req, _ := http.NewRequest("HEAD", localURL, nil)
-	resp, err := localClient.Do(req)
-	if err != nil {
-		// Try a GET request as fallback
-		req, _ = http.NewRequest("GET", localURL, nil)
-		resp, err = localClient.Do(req)
-
+		// Try a HEAD request first to minimize data transfer
+		req, _ := http.NewRequest("HEAD", localURL, nil)
+		resp, err := localClient.Do(req)
 		if err != nil {
-			tunnel.log.Warnf("Warning: Local service at %s doesn't appear to be running: %v", localURL, err)
-			fmt.Printf("Warning: Can't connect to local service at %s\n", localURL)
-			fmt.Println("Make sure your local service is running before starting the tunnel.")
+			// Try a GET request as fallback
+			req, _ = http.NewRequest("GET", localURL, nil)
+			resp, err = localClient.Do(req)
 
-			// Ask user if they want to continue anyway
-			fmt.Print("Continue anyway? (y/n): ")
-			var response string
-			fmt.Scanln(&response)
-			if strings.ToLower(response) != "y" {
-				return fmt.Errorf("tunnel creation cancelled - please start your local service first")
+			if err != nil {
+				tunnel.log.Warnf("Warning: Local service at %s doesn't appear to be running: %v", localURL, err)
+				fmt.Printf("Warning: Can't connect to local service at %s\n", localURL)
+				fmt.Println("Make sure your local service is running before starting the tunnel.")
+
+				// Ask user if they want to continue anyway
+				fmt.Print("Continue anyway? (y/n): ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" {
+					return fmt.Errorf("tunnel creation cancelled - please start your local service first")
+				}
+			} else {
+				resp.Body.Close()
 			}
 		} else {
 			resp.Body.Close()
+			tunnel.log.Infof("Local service verified at %s (status: %d)", localURL, resp.StatusCode)
 		}
 	} else {
-		resp.Body.Close()
-		tunnel.log.Infof("Local service verified at %s (status: %d)", localURL, resp.StatusCode)
+		tunnel.log.Info("Skipping local service check as requested")
+		fmt.Println("Skipping local service check. Make sure your service will be available when needed.")
 	}
 
 	// Start the tunnel with retry mechanism
@@ -372,69 +377,155 @@ func StartTunnel(protocol string, localPort int, publicURL string, tunnelID stri
 	return nil
 }
 
-// Start starts the tunnel connection
+// Start initializes and starts the tunnel
 func (t *Tunnel) Start() error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	if t.running {
-		return fmt.Errorf("tunnel already running")
+		t.mu.Unlock()
+		return fmt.Errorf("tunnel is already running")
 	}
 
-	// Establish WebSocket connection to server
-	if err := t.connectWebSocket(); err != nil {
-		return fmt.Errorf("failed to connect WebSocket: %w", err)
-	}
-
-	// Start message handling loop
-	go t.handleMessages()
-
-	// Register the tunnel
-	if err := t.registerTunnel(); err != nil {
-		t.wsConn.Close()
-		return fmt.Errorf("failed to register tunnel: %w", err)
-	}
-
-	// Start protocol-specific handlers
-	switch t.Protocol {
-	case "http", "https":
-		// For HTTP/HTTPS protocols, we need to forward HTTP requests
-		// This is already handled by the WebSocket message handler
-		t.log.Info("HTTP tunnel established")
-	case "tcp":
-		// For TCP protocol, we need to start a TCP proxy
-		go t.startTCPProxy()
-		t.log.Info("TCP tunnel established")
-	default:
-		t.log.Warnf("Unknown protocol: %s, treating as HTTP", t.Protocol)
-	}
-
-	// Start local proxy server for debugging
-	go t.startLocalProxy()
-
+	// Mark as running
 	t.running = true
-	t.log.Infof("Tunnel started successfully to %s", t.PublicURL)
+	t.mu.Unlock()
+
+	// Make sure we clean up if start fails
+	success := false
+	defer func() {
+		if !success {
+			t.mu.Lock()
+			t.running = false
+			t.mu.Unlock()
+		}
+	}()
+
+	// Connect to WebSocket for tunnel control
+	t.log.Info("Connecting to WebSocket tunnel...")
+
+	// Use retries for connection
+	var err error
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err = t.connectWebSocket()
+		if err == nil {
+			break
+		}
+
+		t.log.WithError(err).Warnf("Failed to connect to WebSocket (attempt %d/%d)", attempt, maxRetries)
+
+		if attempt < maxRetries {
+			delay := time.Duration(attempt) * time.Second
+			t.log.Infof("Retrying in %s...", delay)
+
+			select {
+			case <-t.stopCh:
+				return fmt.Errorf("tunnel stopped while connecting")
+			case <-time.After(delay):
+				// Continue
+			}
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to connect to WebSocket after %d attempts: %w", maxRetries, err)
+	}
+
+	// Register the tunnel with the server
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err = t.registerTunnel()
+		if err == nil {
+			break
+		}
+
+		t.log.WithError(err).Warnf("Failed to register tunnel (attempt %d/%d)", attempt, maxRetries)
+
+		if attempt < maxRetries {
+			delay := time.Duration(attempt) * time.Second
+			t.log.Infof("Retrying in %s...", delay)
+
+			select {
+			case <-t.stopCh:
+				return fmt.Errorf("tunnel stopped while registering")
+			case <-time.After(delay):
+				// Continue
+			}
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to register tunnel after %d attempts: %w", maxRetries, err)
+	}
+
+	// Start local proxy for HTTP(S) tunnels
+	if t.Protocol == "http" || t.Protocol == "https" {
+		if err := t.startLocalProxy(); err != nil {
+			return fmt.Errorf("failed to start local proxy: %w", err)
+		}
+	} else if t.Protocol == "tcp" {
+		if err := t.startTCPProxy(); err != nil {
+			return fmt.Errorf("failed to start TCP proxy: %w", err)
+		}
+	} else {
+		return fmt.Errorf("unsupported protocol: %s", t.Protocol)
+	}
+
+	// Start successful
+	success = true
+	t.log.Infof("Tunnel started successfully. Public URL: %s", t.PublicURL)
 	return nil
 }
 
-// Stop stops the tunnel connection
+// Stop closes the tunnel and all associated connections
 func (t *Tunnel) Stop() error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	if !t.running {
+		t.mu.Unlock()
+		return nil // Already stopped
+	}
+
+	// Prevent multiple stops
+	if t.stopCh == nil {
+		t.mu.Unlock()
+		return fmt.Errorf("stop channel is nil")
+	}
+
+	// Check if already stopping
+	select {
+	case <-t.stopCh:
+		// Already closed
+		t.mu.Unlock()
 		return nil
+	default:
+		// Continue with stop
 	}
 
-	// Close WebSocket connection
-	if t.wsConn != nil {
-		t.wsConn.Close()
-	}
+	t.log.Info("Stopping tunnel...")
 
-	// Signal stop to all goroutines
+	// Signal other goroutines to stop
 	close(t.stopCh)
 
+	// Close WebSocket connection if active
+	if t.wsConn != nil {
+		t.log.Debug("Closing WebSocket connection")
+		err := t.wsConn.Close()
+		if err != nil {
+			t.log.WithError(err).Warn("Error closing WebSocket connection")
+		}
+		t.wsConn = nil
+	}
+
+	// Stop TCP tunnel if active
+	if t.tcpTunnel != nil {
+		t.log.Debug("Stopping TCP tunnel")
+		t.tcpTunnel.Stop()
+		t.tcpTunnel = nil
+	}
+
 	t.running = false
+	t.registered = false
+	t.mu.Unlock()
+
 	t.log.Info("Tunnel stopped")
 	return nil
 }
@@ -444,6 +535,14 @@ func (t *Tunnel) connectWebSocket() error {
 	// Build WebSocket URL including both client_id and tunnel_id parameters
 	wsURL := fmt.Sprintf("wss://%s:%d/api/ws?client_id=%s&tunnel_id=%s",
 		t.ServerHost, t.ServerPort, t.ID, t.ID)
+
+	// Log the connection attempt with detailed information
+	t.log.WithFields(logrus.Fields{
+		"wsURL":      wsURL,
+		"tunnelID":   t.ID,
+		"serverHost": t.ServerHost,
+		"serverPort": t.ServerPort,
+	}).Info("Attempting WebSocket connection")
 
 	// Create WebSocket config with origin
 	origin := fmt.Sprintf("https://%s:%d", t.ServerHost, t.ServerPort)
@@ -456,26 +555,99 @@ func (t *Tunnel) connectWebSocket() error {
 	config.Header.Add("User-Agent", "nxpose-client/1.0")
 	config.Header.Add("X-Nxpose-Client-ID", t.ID)
 	config.Header.Add("X-Nxpose-Tunnel-ID", t.ID)
+	config.Header.Add("Connection", "upgrade")
+	config.Header.Add("Upgrade", "websocket")
 
-	// Configure TLS with insecure skip verify for development
+	// Add version and protocol headers
+	config.Header.Add("X-Nxpose-Version", "1.0.0")
+	config.Header.Add("X-Nxpose-Protocol", t.Protocol)
+
+	// Configure TLS for secure connections
 	config.TlsConfig = &tls.Config{
-		InsecureSkipVerify: false, // Only for development - should use proper certificates in production
+		InsecureSkipVerify: true, // Allow self-signed certs for development
+		MinVersion:         tls.VersionTLS12,
 	}
 
-	// Log the connection attempt
-	t.log.Debugf("Connecting to WebSocket at %s", wsURL)
-
-	// Dial with the config (simpler approach)
+	// Try to connect with the main URL
 	wsConn, err := websocket.DialConfig(config)
+
+	// If connection fails, try alternative port (443)
 	if err != nil {
-		return fmt.Errorf("failed to dial WebSocket: %w", err)
+		t.log.WithError(err).Warn("Failed to connect to WebSocket on primary port, trying standard HTTPS port (443)")
+
+		// Build alternative WebSocket URL using standard HTTPS port
+		altWsURL := fmt.Sprintf("wss://%s/api/ws?client_id=%s&tunnel_id=%s",
+			t.ServerHost, t.ID, t.ID)
+		altOrigin := fmt.Sprintf("https://%s", t.ServerHost)
+
+		altConfig, configErr := websocket.NewConfig(altWsURL, altOrigin)
+		if configErr != nil {
+			return fmt.Errorf("failed to create alternative WebSocket config: %w", configErr)
+		}
+
+		// Copy headers to alternative config
+		for name, values := range config.Header {
+			for _, value := range values {
+				altConfig.Header.Add(name, value)
+			}
+		}
+		altConfig.TlsConfig = config.TlsConfig
+
+		// Try connecting with alternative URL
+		wsConn, err = websocket.DialConfig(altConfig)
+		if err != nil {
+			// Try one more time with the main domain instead of subdomain
+			mainDomain := t.ServerHost
+			if dots := strings.Count(t.ServerHost, "."); dots >= 2 {
+				mainDomainParts := strings.SplitN(t.ServerHost, ".", 2)
+				mainDomain = mainDomainParts[1]
+
+				t.log.WithField("mainDomain", mainDomain).Info("Trying with main domain instead of subdomain")
+
+				finalWsURL := fmt.Sprintf("wss://%s/api/ws?client_id=%s&tunnel_id=%s",
+					mainDomain, t.ID, t.ID)
+				finalOrigin := fmt.Sprintf("https://%s", mainDomain)
+
+				finalConfig, finalConfigErr := websocket.NewConfig(finalWsURL, finalOrigin)
+				if finalConfigErr != nil {
+					return fmt.Errorf("failed to create final WebSocket config: %w", finalConfigErr)
+				}
+
+				// Copy headers to final config
+				for name, values := range config.Header {
+					for _, value := range values {
+						finalConfig.Header.Add(name, value)
+					}
+				}
+				finalConfig.TlsConfig = config.TlsConfig
+
+				// Try connecting with final URL
+				wsConn, err = websocket.DialConfig(finalConfig)
+				if err != nil {
+					return fmt.Errorf("failed to dial WebSocket (all attempts failed): %w", err)
+				}
+
+				t.log.Info("WebSocket connection established using main domain")
+			} else {
+				return fmt.Errorf("failed to dial WebSocket (both primary and alternative ports): %w", err)
+			}
+		} else {
+			t.log.Info("WebSocket connection established using standard HTTPS port")
+		}
+	} else {
+		t.log.Info("WebSocket connection established using configured port")
 	}
 
+	// Store the WebSocket connection
+	t.mu.Lock()
 	t.wsConn = wsConn
-	t.log.Info("WebSocket connection established")
+	t.mu.Unlock()
 
 	// Start a heartbeat routine
 	go t.startHeartbeat()
+
+	// Start error handling routine
+	go t.handleWebSocketErrors()
 
 	return nil
 }
@@ -518,18 +690,43 @@ func (t *Tunnel) startHeartbeat() {
 }
 
 func (t *Tunnel) registerTunnel() error {
+	// If already registered, don't attempt again
+	if t.registered {
+		t.log.Debug("Tunnel already registered, skipping registration")
+		return nil
+	}
+
 	// Create a channel to handle message timeouts
 	msgChan := make(chan TunnelMessage, 1)
 	errChan := make(chan error, 1)
 
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Start a goroutine to read the welcome message
 	go func() {
 		var welcomeMsg TunnelMessage
-		if err := websocket.JSON.Receive(t.wsConn, &welcomeMsg); err != nil {
+		t.mu.Lock()
+		conn := t.wsConn
+		t.mu.Unlock()
+
+		if conn == nil {
+			errChan <- fmt.Errorf("websocket connection is nil")
+			return
+		}
+
+		if err := websocket.JSON.Receive(conn, &welcomeMsg); err != nil {
 			errChan <- fmt.Errorf("failed to receive welcome message: %w", err)
 			return
 		}
-		msgChan <- welcomeMsg
+
+		select {
+		case msgChan <- welcomeMsg:
+			// Message sent successfully
+		case <-ctx.Done():
+			// Context cancelled, do nothing
+		}
 	}()
 
 	// Wait for the welcome message with timeout
@@ -539,7 +736,7 @@ func (t *Tunnel) registerTunnel() error {
 		return err
 	case welcomeMsg = <-msgChan:
 		// Process welcome message
-	case <-time.After(15 * time.Second):
+	case <-ctx.Done():
 		return fmt.Errorf("timeout waiting for welcome message")
 	}
 
@@ -573,118 +770,75 @@ func (t *Tunnel) registerTunnel() error {
 		Data:      regDataJSON,
 	}
 
-	// Log the message being sent
-	t.log.Debugf("Sending tunnel registration message: %+v", regMsg)
-
 	// Send registration message
-	if err := websocket.JSON.Send(t.wsConn, regMsg); err != nil {
+	if err := t.sendMessage(regMsg); err != nil {
 		return fmt.Errorf("failed to send registration message: %w", err)
 	}
 
-	// Start a goroutine to read the response message
+	// Wait for registration response
+	respChan := make(chan TunnelMessage, 1)
+	errChan = make(chan error, 1)
+
+	// Start a goroutine to read the registration response
 	go func() {
-		var response TunnelMessage
-		if err := websocket.JSON.Receive(t.wsConn, &response); err != nil {
+		var respMsg TunnelMessage
+		t.mu.Lock()
+		conn := t.wsConn
+		t.mu.Unlock()
+
+		if conn == nil {
+			errChan <- fmt.Errorf("websocket connection is nil")
+			return
+		}
+
+		if err := websocket.JSON.Receive(conn, &respMsg); err != nil {
 			errChan <- fmt.Errorf("failed to receive registration response: %w", err)
 			return
 		}
-		msgChan <- response
+
+		select {
+		case respChan <- respMsg:
+			// Message sent successfully
+		case <-ctx.Done():
+			// Context cancelled, do nothing
+		}
 	}()
 
-	// Wait for the response message with timeout
-	var response TunnelMessage
+	// Wait for the registration response with timeout
+	var respMsg TunnelMessage
 	select {
 	case err := <-errChan:
 		return err
-	case response = <-msgChan:
-		// Process response message
-	case <-time.After(15 * time.Second):
+	case respMsg = <-respChan:
+		// Process registration response
+	case <-ctx.Done():
 		return fmt.Errorf("timeout waiting for registration response")
 	}
 
-	// Check response and log it
-	t.log.Debugf("Received registration response: %+v", response)
-
-	if response.Type == "error" {
-		var errResp struct {
-			Message string `json:"message"`
-		}
-		if err := json.Unmarshal(response.Data, &errResp); err != nil {
-			return fmt.Errorf("failed to parse error response: %w", err)
-		}
-		return fmt.Errorf("registration failed: %s", errResp.Message)
+	// Check if the response indicates success
+	if respMsg.Type != "registration_success" && respMsg.Type != "tunnel_registered" {
+		t.log.WithField("response_type", respMsg.Type).Warn("Unexpected registration response type")
+		return fmt.Errorf("unexpected registration response: %s", respMsg.Type)
 	}
 
-	if response.Type != "tunnel_registered" {
-		return fmt.Errorf("unexpected response type: %s", response.Type)
-	}
-
+	// Mark as registered
+	t.registered = true
 	t.log.Info("Tunnel registered successfully with server")
+
+	// Start handling messages
+	go t.handleMessages()
+
 	return nil
 }
 
 // handleMessages processes incoming WebSocket messages
 func (t *Tunnel) handleMessages() {
-	// We no longer need to receive the first message here
-	// since registerTunnel already handled the welcome message
-
-	// Set up recovery for any panics
+	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
 			t.log.Errorf("Recovered from panic in message handler: %v", r)
 
-			// Try to reconnect
-			go func() {
-				t.log.Info("Attempting to reconnect after panic...")
-				time.Sleep(5 * time.Second)
-
-				// Close existing connection if any
-				t.mu.Lock()
-				if t.wsConn != nil {
-					t.wsConn.Close()
-					t.wsConn = nil
-				}
-				t.mu.Unlock()
-
-				// Try to reconnect
-				if err := t.connectWebSocket(); err != nil {
-					t.log.WithError(err).Error("Failed to reconnect after panic")
-					return
-				}
-
-				// Re-register the tunnel
-				if err := t.registerTunnel(); err != nil {
-					t.log.WithError(err).Error("Failed to re-register tunnel after panic")
-					return
-				}
-
-				// Restart message handling
-				go t.handleMessages()
-			}()
-		}
-	}()
-
-	for {
-		var message TunnelMessage
-
-		// Use a timeout for receiving messages
-		t.wsConn.SetReadDeadline(time.Now().Add(45 * time.Second))
-		err := websocket.JSON.Receive(t.wsConn, &message)
-		t.wsConn.SetReadDeadline(time.Time{}) // Reset deadline
-
-		if err != nil {
-			if err == io.EOF {
-				t.log.Info("WebSocket connection closed by server")
-			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// This is a timeout, which could be normal if no messages are being sent
-				// Just continue the loop and wait for the next message
-				t.log.Debug("WebSocket read timeout - this is normal if no messages are being sent")
-				continue
-			} else {
-				t.log.WithError(err).Error("Error reading from WebSocket")
-			}
-
-			// Set connection to nil for reconnection
+			// Safe cleanup
 			t.mu.Lock()
 			if t.wsConn != nil {
 				t.wsConn.Close()
@@ -692,86 +846,149 @@ func (t *Tunnel) handleMessages() {
 			}
 			t.mu.Unlock()
 
-			// Signal reconnection if not stopping
-			select {
-			case <-t.stopCh:
-				// Already stopping
-				return
-			default:
-				// Try to reconnect
-				go func() {
-					t.log.Info("Attempting to reconnect...")
-					time.Sleep(5 * time.Second)
+			// Try to reconnect after panic
+			t.log.Info("Attempting to reconnect after panic...")
+			go func() {
+				// Wait a bit before reconnecting
+				time.Sleep(2 * time.Second)
 
+				// Only attempt reconnect if we're still running
+				if t.running {
+					if err := t.connectWebSocket(); err != nil {
+						t.log.WithError(err).Error("Failed to reconnect after panic")
+						return
+					}
+
+					if err := t.registerTunnel(); err != nil {
+						t.log.WithError(err).Error("Failed to register tunnel after panic recovery")
+						return
+					}
+
+					// Restart message handling
+					go t.handleMessages()
+				}
+			}()
+		}
+	}()
+
+	// Process messages until connection is closed
+	for {
+		// Check if we need to stop
+		select {
+		case <-t.stopCh:
+			return
+		default:
+			// Continue processing
+		}
+
+		// Check if connection exists
+		t.mu.Lock()
+		if t.wsConn == nil {
+			t.mu.Unlock()
+			return
+		}
+		t.mu.Unlock()
+
+		// Read message with timeout
+		var message TunnelMessage
+
+		// Set read deadline to detect connection issues
+		t.mu.Lock()
+		if t.wsConn != nil {
+			t.wsConn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		} else {
+			t.mu.Unlock()
+			return
+		}
+		t.mu.Unlock()
+
+		t.mu.Lock()
+		conn := t.wsConn
+		t.mu.Unlock()
+
+		if conn == nil {
+			return
+		}
+
+		err := websocket.JSON.Receive(conn, &message)
+
+		// Reset read deadline
+		t.mu.Lock()
+		if t.wsConn != nil {
+			t.wsConn.SetReadDeadline(time.Time{}) // Reset deadline
+		}
+		t.mu.Unlock()
+
+		if err != nil {
+			if err == io.EOF {
+				t.log.Info("WebSocket connection closed by server")
+			} else {
+				t.log.WithError(err).Error("Error reading from WebSocket")
+			}
+
+			// Clean up
+			t.mu.Lock()
+			if t.wsConn != nil {
+				t.wsConn.Close()
+				t.wsConn = nil
+			}
+			t.mu.Unlock()
+
+			// Try to reconnect if we're still running
+			if t.running {
+				t.log.Info("Attempting to reconnect...")
+				go func() {
 					if err := t.connectWebSocket(); err != nil {
 						t.log.WithError(err).Error("Failed to reconnect")
 						return
 					}
 
 					if err := t.registerTunnel(); err != nil {
-						t.log.WithError(err).Error("Failed to re-register tunnel")
+						t.log.WithError(err).Error("Failed to register tunnel after reconnection")
 						return
 					}
 
+					// Restart message handling
 					go t.handleMessages()
 				}()
-				return
 			}
+			return
 		}
 
 		// Process the message based on its type
-		t.log.Debugf("Received message: type=%s, request_id=%s, tunnel_id=%s",
-			message.Type, message.RequestID, message.TunnelID)
+		t.log.WithFields(logrus.Fields{
+			"message_type": message.Type,
+			"request_id":   message.RequestID,
+		}).Debug("Received WebSocket message")
 
 		switch message.Type {
-		case "http_request":
-			go t.handleHTTPRequest(message)
-		case "tcp_data":
-			go t.handleTCPData(message)
 		case "ping":
-			t.handlePing(message)
+			// Send pong response
+			pong := TunnelMessage{
+				Type:      "pong",
+				RequestID: uuid.New().String(),
+				TunnelID:  t.ID,
+				Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
+			}
+
+			if err := t.sendMessage(pong); err != nil {
+				t.log.WithError(err).Warn("Failed to send pong response")
+			} else {
+				t.log.Debug("Sent pong response")
+			}
+		case "http_request":
+			// Handle HTTP request
+			t.handleHTTPRequest(message)
+		case "tcp_data":
+			// Handle TCP data
+			t.handleTCPData(message)
 		case "error":
-			t.handleError(message)
-		case "welcome":
-			// Already handled in registerTunnel, but handle again if we get another
-			t.log.Debug("Received welcome message (redundant)")
-			// No need to respond to this
-		case "tunnel_registered":
-			// Already handled in registerTunnel, but handle again if we get another
-			t.log.Debug("Received tunnel_registered message (redundant)")
-			// No need to respond to this
+			// Log error message
+			t.log.WithField("request_id", message.RequestID).Warn("Received error message from server")
 		default:
-			t.log.Warnf("Unknown message type: %s", message.Type)
+			t.log.WithField("message_type", message.Type).Debug("Unhandled message type")
 		}
 	}
-}
-
-// handlePing responds to ping messages from the server
-func (t *Tunnel) handlePing(message TunnelMessage) {
-	// Send pong response
-	pong := TunnelMessage{
-		Type:      "pong",
-		RequestID: message.RequestID,
-		Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
-	}
-
-	if err := websocket.JSON.Send(t.wsConn, pong); err != nil {
-		t.log.Errorf("Failed to send pong: %v", err)
-	}
-}
-
-// handleError processes error messages from the server
-func (t *Tunnel) handleError(message TunnelMessage) {
-	var errResp struct {
-		Message string `json:"message"`
-		Code    string `json:"code,omitempty"`
-	}
-	if err := json.Unmarshal(message.Data, &errResp); err != nil {
-		t.log.Errorf("Failed to parse error message: %v", err)
-		return
-	}
-
-	t.log.Errorf("Server error: %s (code: %s)", errResp.Message, errResp.Code)
 }
 
 // handleHTTPRequest processes an HTTP request from the server
@@ -939,10 +1156,10 @@ func (t *Tunnel) sendErrorResponse(requestID, message string) {
 
 // startLocalProxy starts a local HTTP server for proxying requests
 // This is useful for debugging but not required for the main functionality
-func (t *Tunnel) startLocalProxy() {
+func (t *Tunnel) startLocalProxy() error {
 	// Only start the proxy in debug mode
 	if os.Getenv("NXPOSE_DEBUG") != "1" {
-		return
+		return nil
 	}
 
 	// Create HTTP server
@@ -1009,12 +1226,14 @@ func (t *Tunnel) startLocalProxy() {
 		defer cancel()
 		server.Shutdown(ctx)
 	}()
+
+	return nil
 }
 
 // startTCPProxy starts a TCP proxy for TCP tunneling
-func (t *Tunnel) startTCPProxy() {
+func (t *Tunnel) startTCPProxy() error {
 	if t.Protocol != "tcp" {
-		return
+		return nil
 	}
 
 	// Create the TCP tunnel
@@ -1028,30 +1247,63 @@ func (t *Tunnel) startTCPProxy() {
 	// Start the TCP tunnel
 	if err := tcpTunnel.Start(); err != nil {
 		t.log.Errorf("Failed to start TCP tunnel: %v", err)
-		return
+		return err
 	}
 
 	t.log.Infof("TCP proxy started on localhost:%d", t.LocalPort)
+	return nil
 }
 
-// sendMessage sends a message over the WebSocket connection
-// This method is used by TCPTunnel to send messages to the server
+// sendMessage sends a message over the WebSocket connection with proper locking
 func (t *Tunnel) sendMessage(message TunnelMessage) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Check if connection is closed
 	if t.wsConn == nil {
-		return fmt.Errorf("WebSocket connection is closed")
+		return fmt.Errorf("websocket connection is nil")
 	}
 
-	// Send message
-	if err := websocket.JSON.Send(t.wsConn, message); err != nil {
-		t.log.Errorf("Failed to send message: %v", err)
-		return err
-	}
+	// Set write deadline to detect potential timeouts
+	t.wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer t.wsConn.SetWriteDeadline(time.Time{}) // Reset deadline
 
-	return nil
+	// Use context with timeout for sending
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create channels for result and error
+	errCh := make(chan error, 1)
+	doneCh := make(chan struct{}, 1)
+
+	// Use a goroutine for sending to catch any potential panic
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errCh <- fmt.Errorf("panic while sending WebSocket message: %v", r)
+			}
+		}()
+
+		// Send the message
+		err := websocket.JSON.Send(t.wsConn, message)
+		if err != nil {
+			errCh <- err
+			return
+		}
+
+		// Signal success
+		doneCh <- struct{}{}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("failed to send WebSocket message: %w", err)
+	case <-doneCh:
+		// Message sent successfully
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("timeout sending WebSocket message")
+	}
 }
 
 // generateSubdomain creates a random subdomain for the tunnel
@@ -1065,42 +1317,111 @@ func generateSubdomain() string {
 	return shortID
 }
 
+// handleWebSocketErrors monitors the WebSocket connection for errors and
+// attempts to recover if possible
 func (t *Tunnel) handleWebSocketErrors() {
-	defer func() {
-		if r := recover(); r != nil {
-			t.log.Errorf("WebSocket handler panic: %v", r)
-			// Stack trace
-			debug.PrintStack()
-		}
-	}()
+	maxRetries := 5
+	retryCount := 0
+	baseDelay := 2 * time.Second
+	maxDelay := 1 * time.Minute
 
-	// Set up a timeout detector
-	go func() {
-		for {
+	for {
+		// Check if we should exit this goroutine
+		select {
+		case <-t.stopCh:
+			return
+		default:
+			// Continue monitoring
+		}
+
+		// Skip if connection is nil
+		t.mu.Lock()
+		if t.wsConn == nil {
+			t.mu.Unlock()
+			return
+		}
+		t.mu.Unlock()
+
+		// Create a message to test connection health
+		testMessage := TunnelMessage{
+			Type:      "ping",
+			RequestID: uuid.New().String(),
+			TunnelID:  t.ID,
+		}
+
+		// Send a test message periodically (every 45 seconds)
+		time.Sleep(45 * time.Second)
+
+		t.mu.Lock()
+		if t.wsConn == nil {
+			t.mu.Unlock()
+			return
+		}
+
+		// Try to send a test message
+		err := websocket.JSON.Send(t.wsConn, testMessage)
+		t.mu.Unlock()
+
+		// If there's an error, attempt to reconnect
+		if err != nil {
+			if retryCount >= maxRetries {
+				t.log.WithError(err).Error("WebSocket connection failed and max retries reached")
+
+				// Signal that we need to reset the tunnel
+				if t.running {
+					go t.Stop() // This will close the connection and stopCh, ending this goroutine
+				}
+				return
+			}
+
+			// Calculate backoff delay with exponential increase and jitter
+			delay := baseDelay * time.Duration(1<<uint(retryCount))
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+			jitter := time.Duration(rand.Int63n(int64(delay) / 4))
+			delay = delay + jitter
+
+			t.log.WithFields(logrus.Fields{
+				"retry":    retryCount + 1,
+				"delay":    delay.String(),
+				"maxTries": maxRetries,
+			}).Warn("WebSocket error detected, attempting to reconnect")
+
+			// Wait before reconnecting
 			select {
+			case <-time.After(delay):
+				// Continue with reconnect
 			case <-t.stopCh:
 				return
-			case <-time.After(5 * time.Second):
-				// Check if WebSocket connection is still valid
-				t.mu.Lock()
-				if t.wsConn == nil {
-					t.mu.Unlock()
-					continue
-				}
+			}
 
-				// Send a ping to check connection
-				pingMsg := TunnelMessage{
-					Type: "ping",
-					Data: json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
-				}
+			// Attempt to reconnect
+			t.mu.Lock()
+			// Close existing connection
+			if t.wsConn != nil {
+				t.wsConn.Close()
+				t.wsConn = nil
+			}
+			t.mu.Unlock()
 
-				err := websocket.JSON.Send(t.wsConn, pingMsg)
-				t.mu.Unlock()
+			// Reconnect
+			if err := t.connectWebSocket(); err != nil {
+				t.log.WithError(err).Error("Failed to reconnect WebSocket")
+				retryCount++
+			} else {
+				t.log.Info("Successfully reconnected WebSocket")
+				retryCount = 0 // Reset retry counter on successful reconnection
 
-				if err != nil {
-					t.log.Warnf("WebSocket ping failed: %v", err)
+				// Re-register the tunnel
+				if err := t.registerTunnel(); err != nil {
+					t.log.WithError(err).Error("Failed to re-register tunnel after reconnection")
+					retryCount++ // Count this as a retry failure
 				}
 			}
+		} else {
+			// If message was sent successfully, reset retry counter
+			retryCount = 0
 		}
-	}()
+	}
 }

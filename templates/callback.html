@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Complete</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+            text-align: center;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .success-icon {
+            color: #2ecc71;
+            font-size: 48px;
+            margin: 20px 0;
+        }
+        .message {
+            margin-bottom: 30px;
+        }
+        .info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+        .certificate {
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 100px;
+            overflow: auto;
+            margin-bottom: 20px;
+            word-break: break-all;
+            font-size: 0.8em;
+            text-align: left;
+        }
+    </style>
+    <script>
+        // This script handles redirecting the certificate data back to the client
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const callbackUrl = "{{.CallbackURL}}";
+            const stateToken = "{{.StateToken}}";
+            const certificate = "{{.Certificate}}";
+            
+            if (callbackUrl && certificate) {
+                // Add parameters to the callback URL
+                const redirectUrl = new URL(callbackUrl);
+                redirectUrl.searchParams.append('certificate', btoa(certificate));
+                redirectUrl.searchParams.append('state', stateToken);
+                
+                // Redirect back to the client
+                setTimeout(function() {
+                    window.location.href = redirectUrl.toString();
+                }, 1500);
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Authentication Complete</h1>
+    
+    <div class="success-icon">✓</div>
+    
+    <div class="message">
+        <p>Authentication successful! Your certificate has been generated.</p>
+        <p>You will be redirected back to the nxpose client automatically.</p>
+    </div>
+    
+    <div class="info">
+        <p>Certificate snippet:</p>
+        <div class="certificate">
+            {{if .Certificate}}
+                {{slice .Certificate 0 100}}...
+            {{else}}
+                No certificate data available.
+            {{end}}
+        </div>
+    </div>
+</body>
+</html> 

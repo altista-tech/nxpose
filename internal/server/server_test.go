@@ -8,9 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"nxpose/internal/config"
 	"nxpose/internal/logger"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestRegistrationEndpoint tests the client registration endpoint
@@ -141,6 +142,16 @@ func TestTunnelCreation(t *testing.T) {
 
 // TestExtractSubdomain tests the subdomain extraction function
 func TestExtractSubdomain(t *testing.T) {
+	// Create a test server
+	logger := logger.New(true)
+	cfg := &config.ServerConfig{
+		BaseDomain: "example.com",
+	}
+	srv := &Server{
+		log:    logger,
+		config: cfg,
+	}
+
 	tests := []struct {
 		hostname      string
 		baseDomain    string
@@ -154,7 +165,7 @@ func TestExtractSubdomain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := extractSubdomain(tt.hostname, tt.baseDomain)
+		got := srv.extractSubdomain(tt.hostname, tt.baseDomain)
 		assert.Equal(t, tt.wantSubdomain, got)
 	}
 }
