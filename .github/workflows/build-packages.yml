@@ -1,0 +1,123 @@
+name: Build and Upload Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (optional, defaults to git tag or "dev")'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for proper versioning
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install build dependencies
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Set VERSION env var
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          elif [[ $GITHUB_REF == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          else
+            echo "VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")" >> $GITHUB_ENV
+          fi
+          echo "Building version: $VERSION"
+
+      - name: Build packages
+        run: make packages VERSION=${{ env.VERSION }}
+
+      - name: List built packages
+        run: ls -la packages/
+
+      - name: Install s3cmd
+        run: |
+          sudo apt-get install -y s3cmd
+
+      - name: Upload to DO Spaces
+        env:
+          DO_SPACE_KEY: ${{ secrets.DO_SPACE_KEY }}
+          DO_SPACE_SECRET: ${{ secrets.DO_SPACE_SECRET }}
+          DO_SPACE_ENDPOINT: ${{ secrets.DO_SPACE_ENDPOINT }}
+          DO_SPACE_BUCKET: ${{ secrets.DO_SPACE_BUCKET }}
+        run: |
+          # Configure s3cmd
+          cat > ~/.s3cfg << EOF
+          [default]
+          access_key = ${DO_SPACE_KEY}
+          secret_key = ${DO_SPACE_SECRET}
+          host_base = ${DO_SPACE_ENDPOINT}
+          host_bucket = %(bucket)s.${DO_SPACE_ENDPOINT}
+          use_https = True
+          EOF
+          
+          # Create directory for this version
+          UPLOAD_PATH="nxpose/${VERSION}"
+          
+          # Upload each package
+          for package in packages/*; do
+            filename=$(basename "$package")
+            s3cmd put "$package" "s3://${DO_SPACE_BUCKET}/${UPLOAD_PATH}/${filename}" --acl-public
+            echo "::notice ::Uploaded ${filename} to https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename}"
+          done
+          
+          # Create a simple index.html with links to all files
+          echo "<html><head><title>NXpose $VERSION Packages</title></head><body>" > index.html
+          echo "<h1>NXpose $VERSION Packages</h1><ul>" >> index.html
+          for package in packages/*; do
+            filename=$(basename "$package")
+            echo "<li><a href=\"https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename}\">${filename}</a></li>" >> index.html
+          done
+          echo "</ul></body></html>" >> index.html
+          
+          # Upload index.html
+          s3cmd put index.html "s3://${DO_SPACE_BUCKET}/${UPLOAD_PATH}/index.html" --acl-public
+          
+          # Output the index URL
+          echo "::notice ::Package index: https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/index.html"
+          
+      - name: Create GitHub Release with Links
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DO_SPACE_BUCKET: ${{ secrets.DO_SPACE_BUCKET }}
+          DO_SPACE_ENDPOINT: ${{ secrets.DO_SPACE_ENDPOINT }}
+        run: |
+          UPLOAD_PATH="nxpose/${VERSION}"
+          INDEX_URL="https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/index.html"
+          
+          # Create release body with links to packages
+          echo "# NXpose $VERSION" > release_body.md
+          echo "" >> release_body.md
+          echo "## Packages" >> release_body.md
+          echo "" >> release_body.md
+          echo "All packages are available at [Package Index](${INDEX_URL})" >> release_body.md
+          echo "" >> release_body.md
+          echo "### Direct Links" >> release_body.md
+          echo "" >> release_body.md
+          
+          for package in packages/*; do
+            filename=$(basename "$package")
+            echo "- [${filename}](https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename})" >> release_body.md
+          done
+          
+          # Create GitHub release
+          gh release create "v${VERSION}" --title "NXpose v${VERSION}" --notes-file release_body.md 

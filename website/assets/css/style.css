@@ -1,0 +1,190 @@
+/* 
+ * NXpose Website Styles
+ * Light and Dark themes
+ */
+
+:root {
+    --bs-primary: #0d6efd;
+    --primary-darker: #0b5ed7;
+}
+
+[data-bs-theme="dark"] {
+    --bs-body-bg: #212529;
+    --bs-body-color: #dee2e6;
+    --bs-body-color-rgb: 222, 226, 230;
+    --bs-emphasis-color: #fff;
+    --bs-emphasis-color-rgb: 255, 255, 255;
+    --bs-secondary-color: rgba(222, 226, 230, 0.75);
+    --bs-secondary-color-rgb: 222, 226, 230;
+    --bs-tertiary-color: rgba(222, 226, 230, 0.5);
+    --bs-link-color: #6ea8fe;
+    --bs-link-hover-color: #8bb9fe;
+    --bs-link-color-rgb: 110, 168, 254;
+    --bs-border-color: #495057;
+    --bs-card-bg: #343a40;
+    --bs-card-cap-bg: #2b3035;
+    --bs-tertiary-bg: #2b3035;
+    --nav-hover-bg: rgba(255, 255, 255, 0.05);
+}
+
+/* Base styles */
+body {
+    font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    position: relative;
+    min-height: 100vh;
+}
+
+/* Global components */
+.shadow-sm {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075) !important;
+}
+
+/* Navigation */
+#mainNav {
+    transition: all 0.3s ease-in-out;
+    background-color: var(--bs-body-bg);
+}
+
+#mainNav .navbar-brand {
+    font-size: 1.5rem;
+    transition: all 0.3s ease-in-out;
+}
+
+#mainNav .nav-link {
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease-in-out;
+}
+
+#mainNav .nav-link:hover {
+    background-color: var(--nav-hover-bg, rgba(0, 0, 0, 0.05));
+}
+
+/* Theme toggle button */
+.theme-toggle {
+    padding: 0.375rem 0.5rem;
+    border-radius: 50%;
+    border: none;
+    background-color: transparent;
+    color: var(--bs-body-color);
+    transition: all 0.2s ease-in-out;
+}
+
+.theme-toggle:hover {
+    background-color: var(--nav-hover-bg, rgba(0, 0, 0, 0.05));
+}
+
+/* Hero section */
+.hero {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+}
+
+/* Terminal styling */
+.terminal {
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background-color: #2d333b;
+    margin: 1.5rem auto;
+    max-width: 100%;
+}
+
+.terminal-header {
+    background-color: #1c2128;
+    color: #fff;
+    display: flex;
+    padding: 0.5rem;
+}
+
+.terminal-button {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.terminal-button.red {
+    background-color: #ff5f56;
+}
+
+.terminal-button.yellow {
+    background-color: #ffbd2e;
+}
+
+.terminal-button.green {
+    background-color: #27c93f;
+}
+
+.terminal-title {
+    font-size: 0.8rem;
+    opacity: 0.8;
+}
+
+.terminal-body {
+    color: #d1d5da;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    padding: 1rem;
+}
+
+/* Feature icons */
+.feature-icon {
+    font-size: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    border-radius: 0.75rem;
+    background-color: rgba(var(--bs-primary-rgb), 0.1);
+}
+
+/* Code blocks */
+pre {
+    border-radius: 0.5rem;
+    overflow: auto;
+}
+
+pre code {
+    font-family: 'Courier New', monospace;
+}
+
+/* Downloads section */
+.download-card {
+    transition: all 0.3s ease-in-out;
+}
+
+.download-card:hover {
+    transform: translateY(-5px);
+}
+
+/* Responsive adjustments */
+@media (max-width: 991.98px) {
+    .hero {
+        text-align: center;
+    }
+    
+    .hero .d-flex {
+        justify-content: center;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .display-4 {
+        font-size: 2.5rem;
+    }
+}
+
+/* Dark mode specific styles */
+[data-bs-theme="dark"] .terminal {
+    border: 1px solid var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .shadow-sm {
+    box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.15) !important;
+}
+
+[data-bs-theme="dark"] .bg-light {
+    background-color: #2b3035 !important;
+} 

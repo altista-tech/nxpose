@@ -12,6 +12,22 @@ NXpose is a secure tunneling service written in Go that allows you to expose loc
 
 ## Installation
 
+### From Prebuilt Binaries
+
+Pre-built binaries for Linux, macOS, and Windows are available on the [releases page](https://github.com/yourusername/nxpose/releases).
+
+### From Packages
+
+For Linux, APK and RPM packages are available for both AMD64 and ARM64 architectures:
+
+```bash
+# Install from RPM (Fedora, CentOS, RHEL)
+sudo rpm -i nxpose_version_x86_64.rpm
+
+# Install from APK (Alpine Linux)
+sudo apk add --allow-untrusted nxpose_version_x86_64.apk
+```
+
 ### From Source
 
 ```bash
@@ -19,19 +35,89 @@ NXpose is a secure tunneling service written in Go that allows you to expose loc
 git clone https://github.com/yourusername/nxpose.git
 cd nxpose
 
-# Build the client
-cd cmd/client
-go build -o nxpose
+# Build the client and server using Make
+make build
 
-# Build the server (if you want to run your own server)
-cd ../server
-go build -o nxpose-server
+# The binaries will be available in the './bin' directory
 ```
 
 ### Using Go Install
 
 ```bash
 go install github.com/yourusername/nxpose/cmd/client@latest
+```
+
+## Using the Makefile
+
+The repository includes a comprehensive Makefile for building binaries for multiple platforms and creating package formats.
+
+### Building Binaries
+
+```bash
+# Build both client and server for your current platform
+make build
+
+# Build only the server
+make server
+
+# Build only the client
+make client
+
+# Build for all supported platforms (Linux, macOS, Windows - AMD64 and ARM64)
+make build-all
+```
+
+### Creating Packages
+
+```bash
+# Create APK and RPM packages for both AMD64 and ARM64
+make packages
+
+# Create only RPM packages
+make rpm
+
+# Create only APK packages
+make apk
+```
+
+### Other Makefile Commands
+
+```bash
+# Install dependencies
+make deps
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+
+# Show available commands
+make help
+```
+
+### Windows Build Script
+
+For Windows users, a batch script is provided to simplify building without requiring GNU Make:
+
+```cmd
+# Build both client and server
+build.bat build
+
+# Build only the server
+build.bat server
+
+# Build only the client
+build.bat client
+
+# Build for all supported platforms
+build.bat build-all
+
+# Clean build artifacts
+build.bat clean
+
+# Show available commands
+build.bat help
 ```
 
 ## Usage

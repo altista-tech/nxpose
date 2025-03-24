@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NXpose - Secure Tunneling Service</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg sticky-top" id="mainNav">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#"><span class="text-primary">NX</span>pose</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarResponsive">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#features">Features</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#installation">Installation</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#usage">Usage</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#download">Download</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="server.html">Server Setup</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="docs.html">Documentation</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="https://github.com/nxrvl/nxpose" target="_blank">
+                            <i class="fab fa-github"></i> GitHub
+                        </a>
+                    </li>
+                    <li class="nav-item ms-3">
+                        <button class="btn btn-sm theme-toggle" id="theme-toggle">
+                            <i class="fas fa-moon"></i>
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero py-5">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-7">
+                    <h1 class="display-4 fw-bold mb-3">Secure Tunneling Service</h1>
+                    <p class="lead mb-4">NXpose is a powerful Go-based service that allows you to expose local services to the internet through encrypted tunnels securely and easily.</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="#download" class="btn btn-primary btn-lg">
+                            <i class="fas fa-download me-2"></i>Download
+                        </a>
+                        <a href="https://github.com/nxrvl/nxpose" class="btn btn-outline-secondary btn-lg" target="_blank">
+                            <i class="fab fa-github me-2"></i>GitHub
+                        </a>
+                    </div>
+                </div>
+                <div class="col-lg-5 d-none d-lg-block">
+                    <div class="terminal shadow-lg">
+                        <div class="terminal-header d-flex align-items-center px-3 py-2">
+                            <div class="terminal-button red"></div>
+                            <div class="terminal-button yellow"></div>
+                            <div class="terminal-button green"></div>
+                            <div class="terminal-title mx-auto">Terminal</div>
+                        </div>
+                        <div class="terminal-body p-3">
+                            <div class="mb-2"><span class="text-success">$</span> nxpose expose http 3000</div>
+                            <div class="mb-2">Starting tunnel...</div>
+                            <div class="text-primary">✓ Tunnel established</div>
+                            <div>Your local server is now available at:</div>
+                            <div class="text-success">https://example.nxpose.com</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section id="features" class="py-5">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Features</h2>
+                <p class="lead">Why choose NXpose for your tunneling needs</p>
+            </div>
+            <div class="row g-4">
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-lock text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Secure Encrypted Tunnels</h5>
+                            <p class="card-text">All traffic is protected using TLS encryption to ensure your data remains private and secure.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-bolt text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Instant Exposure</h5>
+                            <p class="card-text">Quickly expose any local service to the internet with a simple command.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-code-branch text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Webhook Testing</h5>
+                            <p class="card-text">Perfect for testing webhook integrations with your local development environment.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-network-wired text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Multi-protocol Support</h5>
+                            <p class="card-text">Works with HTTP, HTTPS, TCP and more protocols to support various applications.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-globe text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Custom Subdomains</h5>
+                            <p class="card-text">Generate random or specify your own subdomains for easy access to your services.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="feature-icon mb-3">
+                                <i class="fas fa-sync-alt text-primary"></i>
+                            </div>
+                            <h5 class="card-title">Reliable Connections</h5>
+                            <p class="card-text">Automatic reconnection and efficient data transfer with minimal overhead.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Installation Section -->
+    <section id="installation" class="py-5 bg-light">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Installation</h2>
+                <p class="lead">Multiple ways to install NXpose</p>
+            </div>
+            <div class="row">
+                <div class="col-lg-10 mx-auto">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white border-0">
+                            <ul class="nav nav-tabs card-header-tabs" id="installTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="binaries-tab" data-bs-toggle="tab" data-bs-target="#binaries" type="button" role="tab" aria-controls="binaries" aria-selected="true">Prebuilt Binaries</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="packages-tab" data-bs-toggle="tab" data-bs-target="#packages" type="button" role="tab" aria-controls="packages" aria-selected="false">Packages</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="source-tab" data-bs-toggle="tab" data-bs-target="#source" type="button" role="tab" aria-controls="source" aria-selected="false">From Source</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="go-tab" data-bs-toggle="tab" data-bs-target="#go" type="button" role="tab" aria-controls="go" aria-selected="false">Go Install</button>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="card-body">
+                            <div class="tab-content" id="installTabsContent">
+                                <div class="tab-pane fade show active" id="binaries" role="tabpanel" aria-labelledby="binaries-tab">
+                                    <p>Pre-built binaries for Linux, macOS, and Windows are available on the <a href="https://github.com/nxrvl/nxpose/releases" target="_blank">releases page</a>.</p>
+                                    <p>Simply download the appropriate binary for your platform, make it executable (if on Linux/macOS), and you're ready to go!</p>
+                                    <pre class="bg-dark text-light p-3 rounded"><code># Linux/macOS
+chmod +x nxpose
+./nxpose
+
+# Windows
+nxpose.exe</code></pre>
+                                </div>
+                                <div class="tab-pane fade" id="packages" role="tabpanel" aria-labelledby="packages-tab">
+                                    <p>For Linux, APK and RPM packages are available for both AMD64 and ARM64 architectures:</p>
+                                    <pre class="bg-dark text-light p-3 rounded"><code># Install from RPM (Fedora, CentOS, RHEL)
+sudo rpm -i nxpose_version_x86_64.rpm
+
+# Install from APK (Alpine Linux)
+sudo apk add --allow-untrusted nxpose_version_x86_64.apk</code></pre>
+                                </div>
+                                <div class="tab-pane fade" id="source" role="tabpanel" aria-labelledby="source-tab">
+                                    <p>Build from source using either Make or the provided build script:</p>
+                                    <pre class="bg-dark text-light p-3 rounded"><code># Clone the repository
+git clone https://github.com/nxrvl/nxpose.git
+cd nxpose
+
+# Using Make (Linux/macOS)
+make build
+
+# Using Windows build script
+build.bat build
+
+# The binaries will be available in the './bin' directory</code></pre>
+                                </div>
+                                <div class="tab-pane fade" id="go" role="tabpanel" aria-labelledby="go-tab">
+                                    <p>If you have Go installed, you can use the Go install command:</p>
+                                    <pre class="bg-dark text-light p-3 rounded"><code>go install github.com/nxrvl/nxpose/cmd/client@latest</code></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Usage Section -->
+    <section id="usage" class="py-5">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Usage</h2>
+                <p class="lead">How to use NXpose</p>
+            </div>
+            <div class="row">
+                <div class="col-lg-10 mx-auto">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body">
+                            <h5 class="mb-3">Register with a Server</h5>
+                            <p>Before creating tunnels, you need to register with the NXpose server to obtain certificates:</p>
+                            <pre class="bg-dark text-light p-3 rounded"><code>nxpose register</code></pre>
+                        </div>
+                    </div>
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body">
+                            <h5 class="mb-3">Expose a Local Service</h5>
+                            <p>To expose a local service running on port 3000 via HTTP:</p>
+                            <pre class="bg-dark text-light p-3 rounded"><code>nxpose expose http 3000</code></pre>
+                            <p>This will create a secure tunnel and provide you with a public URL that forwards to your local service.</p>
+                        </div>
+                    </div>
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <h5 class="mb-3">Skip Local Service Check</h5>
+                            <p>When testing webhooks or scenarios where you need to get the URL before starting your local service:</p>
+                            <pre class="bg-dark text-light p-3 rounded"><code>nxpose expose http 3000 --skip-local-check</code></pre>
+                            <p>This will create a tunnel without checking if the local service is running, which is useful when you need the public URL to configure your local application.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Download Section -->
+    <section id="download" class="py-5 bg-light">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Download</h2>
+                <p class="lead">Get NXpose for your platform</p>
+            </div>
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body text-center">
+                            <div class="display-1 mb-3">
+                                <i class="fab fa-linux"></i>
+                            </div>
+                            <h4>Linux</h4>
+                            <div class="d-grid gap-2">
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_linux_amd64.tar.gz" class="btn btn-primary">AMD64</a>
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_linux_arm64.tar.gz" class="btn btn-primary">ARM64</a>
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_amd64.rpm" class="btn btn-outline-secondary">RPM (x86_64)</a>
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_amd64.apk" class="btn btn-outline-secondary">APK (x86_64)</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body text-center">
+                            <div class="display-1 mb-3">
+                                <i class="fab fa-apple"></i>
+                            </div>
+                            <h4>macOS</h4>
+                            <div class="d-grid gap-2">
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_darwin_amd64.tar.gz" class="btn btn-primary">AMD64 (Intel)</a>
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_darwin_arm64.tar.gz" class="btn btn-primary">ARM64 (Apple Silicon)</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body text-center">
+                            <div class="display-1 mb-3">
+                                <i class="fab fa-windows"></i>
+                            </div>
+                            <h4>Windows</h4>
+                            <div class="d-grid gap-2">
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_windows_amd64.zip" class="btn btn-primary">AMD64</a>
+                                <a href="https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_windows_arm64.zip" class="btn btn-primary">ARM64</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center mt-4">
+                <a href="https://github.com/nxrvl/nxpose/releases" class="btn btn-outline-primary" target="_blank">
+                    View all releases
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-4 border-top">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6 text-center text-md-start">
+                    <a class="navbar-brand fw-bold" href="#"><span class="text-primary">NX</span>pose</a>
+                    <p class="small mb-0 mt-2">© 2023 NXpose. All rights reserved.</p>
+                </div>
+                <div class="col-md-6 text-center text-md-end mt-3 mt-md-0">
+                    <ul class="list-inline mb-0">
+                        <li class="list-inline-item">
+                            <a href="docs.html" class="text-decoration-none text-muted">
+                                <i class="fas fa-book"></i> Documentation
+                            </a>
+                        </li>
+                        <li class="list-inline-item">
+                            <a href="server.html" class="text-decoration-none text-muted">
+                                <i class="fas fa-server"></i> Server Setup
+                            </a>
+                        </li>
+                        <li class="list-inline-item">
+                            <a href="https://github.com/nxrvl/nxpose" class="text-decoration-none text-muted" target="_blank">
+                                <i class="fab fa-github"></i> GitHub
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="assets/js/main.js"></script>
+</body>
+</html> 
