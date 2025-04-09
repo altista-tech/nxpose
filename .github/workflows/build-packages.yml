@@ -64,6 +64,11 @@ jobs:
         run: |
           mkdir -p etc/nxpose
           cp server-config.example.yaml etc/nxpose/server-config.yaml
+          
+      - name: Fix Makefile if needed
+        run: |
+          # Fix any potential trailing whitespace in Makefile's .PHONY line
+          perl -i -pe 's/\.PHONY:.+help\s+$/.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help/' Makefile
 
       - name: Build and package for ${{ matrix.arch }} (${{ matrix.format }})
         run: |

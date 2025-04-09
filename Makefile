@@ -1,6 +1,6 @@
 # Makefile for nxpose
 # Builds the nxpose server and creates packages for macOS and Linux (ARM and AMD64)
-# Supports multiple package formats: .deb, .rpm, .apk for Linux and .pkg for macOS
+# Supports multiple package formats: .deb, .rpm for Linux and .pkg for macOS
 
 # Variables
 NAME := nxpose
@@ -34,7 +34,7 @@ else ifeq ($(ARCH),aarch64)
 endif
 
 # Linux package formats
-LINUX_PACKAGE_FORMATS := deb rpm apk
+LINUX_PACKAGE_FORMATS := deb rpm
 
 # OS-specific settings
 ifeq ($(OS),Darwin)
@@ -51,8 +51,6 @@ else
     PACKAGE_NAME := $(NAME)_$(VERSION)_$(ARCH).$(PACKAGE_FORMAT)
   else ifeq ($(PACKAGE_FORMAT),rpm)
     PACKAGE_NAME := $(NAME)-$(VERSION)-$(RPM_RELEASE).$(ARCH).$(PACKAGE_FORMAT)
-  else ifeq ($(PACKAGE_FORMAT),apk)
-    PACKAGE_NAME := $(NAME)-$(VERSION)-r0.$(ARCH).$(PACKAGE_FORMAT)
   endif
 endif
 
@@ -297,7 +295,7 @@ else
 ifeq ($(PACKAGE_FORMAT),deb)
 	@sudo dpkg -i $(PACKAGE_NAME)
 else ifeq ($(PACKAGE_FORMAT),rpm)
-	@sudo rpm -i $(NAME)_$(VERSION)_$(ARCH).rpm
+	@sudo rpm -i $(PACKAGE_NAME)
 endif
 endif
 
@@ -322,13 +320,13 @@ endif
 clean:
 	@echo "Cleaning build directory for $(ARCH)..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb $(NAME)*$(ARCH).rpm $(NAME)*$(ARCH).apk
+	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb $(NAME)*$(ARCH).rpm
 
 # Clean all build directories
 clean-all:
 	@echo "Cleaning all build directories..."
 	@rm -rf build
-	@rm -f $(NAME)*.pkg $(NAME)*.deb $(NAME)*.rpm $(NAME)*.apk
+	@rm -f $(NAME)*.pkg $(NAME)*.deb $(NAME)*.rpm
 
 # Test
 test:
@@ -344,7 +342,7 @@ fmt:
 help:
 	@echo "Available targets:"
 	@echo "  all        - Clean, build and package for current architecture ($(ARCH))"
-	@echo "  all-arch   - Build and package for all architectures (amd64, arm64) and formats (deb,rpm,apk)"
+	@echo "  all-arch   - Build and package for all architectures (amd64, arm64) and formats (deb,rpm)"
 	@echo "  build      - Build the binary for current architecture"
 	@echo "  prepare-package - Prepare the package structure"
 	@echo "  package    - Create the package"
@@ -362,6 +360,6 @@ help:
 	@echo ""
 	@echo "Package format can be specified with PACKAGE_FORMAT=<format>"
 	@echo "  Example: make PACKAGE_FORMAT=rpm"
-	@echo "  Supported formats on Linux: deb, rpm, apk"
+	@echo "  Supported formats on Linux: deb, rpm"
 
-.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help 
+.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help
