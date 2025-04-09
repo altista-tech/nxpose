@@ -1,12 +1,10 @@
 # Makefile for nxpose
 # Builds the nxpose server and creates packages for macOS and Linux (ARM and AMD64)
-# Supports multiple package formats: .deb, .rpm for Linux and .pkg for macOS
+# Supports multiple package formats: .deb for Linux and .pkg for macOS
 
 # Variables
 NAME := nxpose
 VERSION := 1.0.0
-# Default RPM release number
-RPM_RELEASE ?= 1
 GO := go
 GOFMT := gofmt
 GOBUILD := $(GO) build
@@ -34,7 +32,7 @@ else ifeq ($(ARCH),aarch64)
 endif
 
 # Linux package formats
-LINUX_PACKAGE_FORMATS := deb rpm
+LINUX_PACKAGE_FORMATS := deb
 
 # OS-specific settings
 ifeq ($(OS),Darwin)
@@ -49,8 +47,6 @@ else
   # Fix the naming convention for deb packages
   ifeq ($(PACKAGE_FORMAT),deb)
     PACKAGE_NAME := $(NAME)_$(VERSION)_$(ARCH).$(PACKAGE_FORMAT)
-  else ifeq ($(PACKAGE_FORMAT),rpm)
-    PACKAGE_NAME := $(NAME)-$(VERSION)-$(RPM_RELEASE).$(ARCH).$(PACKAGE_FORMAT)
   endif
 endif
 
@@ -76,12 +72,6 @@ else
   DEBIAN_POSTINST := $(DEBIAN_DIR)/postinst
   DEBIAN_PRERM := $(DEBIAN_DIR)/prerm
   SYSTEMD_SERVICE := $(SYSTEMD_DIR)/$(NAME).service
-  
-  # RPM package directories
-  RPM_BUILD_DIR := $(BUILD_DIR)/rpmbuild
-  SPEC_FILE := $(RPM_BUILD_DIR)/SPECS/$(NAME).spec
-  RPM_SOURCES_DIR := $(RPM_BUILD_DIR)/SOURCES
-  RPM_BUILDROOT := $(RPM_BUILD_DIR)/BUILDROOT/$(NAME)-$(VERSION)-1.$(ARCH)
 endif
 
 # Default target
@@ -160,7 +150,6 @@ else
 	@cp nxpose.service $(SYSTEMD_SERVICE)
 	
 	# Format-specific preparation
-ifeq ($(PACKAGE_FORMAT),deb)
 	@mkdir -p $(DEBIAN_DIR)
 	@echo "Package: $(NAME)" > $(DEBIAN_CONTROL)
 	@echo "Version: $(VERSION)" >> $(DEBIAN_CONTROL)
@@ -196,43 +185,6 @@ ifeq ($(PACKAGE_FORMAT),deb)
 	@echo "systemctl disable $(NAME).service || true" >> $(DEBIAN_PRERM)
 	@echo "exit 0" >> $(DEBIAN_PRERM)
 	@chmod 755 $(DEBIAN_PRERM)
-else ifeq ($(PACKAGE_FORMAT),rpm)
-	@mkdir -p $(RPM_BUILD_DIR)/SPECS $(RPM_BUILD_DIR)/SOURCES $(RPM_BUILD_DIR)/RPMS $(RPM_BUILD_DIR)/SRPMS $(RPM_BUILD_DIR)/BUILD
-	@echo "Name: $(NAME)" > $(SPEC_FILE)
-	@echo "Version: $(VERSION)" >> $(SPEC_FILE)
-	@echo "Release: $(RPM_RELEASE)" >> $(SPEC_FILE)
-	@echo "Summary: nxpose tunneling server" >> $(SPEC_FILE)
-	@echo "Group: Applications/Internet" >> $(SPEC_FILE)
-	@echo "License: MIT" >> $(SPEC_FILE)
-	@echo "BuildArch: $(ARCH)" >> $(SPEC_FILE)
-	@echo "AutoReqProv: no" >> $(SPEC_FILE)
-	@echo "" >> $(SPEC_FILE)
-	@echo "%description" >> $(SPEC_FILE)
-	@echo "A secure tunneling service to expose local services to the internet." >> $(SPEC_FILE)
-	@echo "" >> $(SPEC_FILE)
-	@echo "%pre" >> $(SPEC_FILE)
-	@echo "getent group nxpose >/dev/null || groupadd -r nxpose" >> $(SPEC_FILE)
-	@echo "getent passwd nxpose >/dev/null || useradd -r -g nxpose -s /sbin/nologin -d /opt/nxpose nxpose" >> $(SPEC_FILE)
-	@echo "" >> $(SPEC_FILE)
-	@echo "%files" >> $(SPEC_FILE)
-	@echo "/opt/$(NAME)/" >> $(SPEC_FILE)
-	@echo "/etc/$(NAME)/" >> $(SPEC_FILE)
-	@echo "/etc/systemd/system/$(NAME).service" >> $(SPEC_FILE)
-	@echo "/var/log/$(NAME)/" >> $(SPEC_FILE)
-	@echo "" >> $(SPEC_FILE)
-	@echo "%post" >> $(SPEC_FILE)
-	@echo "chown -R nxpose:nxpose /opt/nxpose" >> $(SPEC_FILE)
-	@echo "chown -R nxpose:nxpose /etc/nxpose" >> $(SPEC_FILE)
-	@echo "chown -R nxpose:nxpose /var/log/nxpose" >> $(SPEC_FILE)
-	@echo "systemctl daemon-reload" >> $(SPEC_FILE)
-	@echo "systemctl enable $(NAME).service" >> $(SPEC_FILE)
-	@echo "systemctl start $(NAME).service || true" >> $(SPEC_FILE)
-	@echo "" >> $(SPEC_FILE)
-	@echo "%preun" >> $(SPEC_FILE)
-	@echo "systemctl stop $(NAME).service || true" >> $(SPEC_FILE)
-	@echo "systemctl disable $(NAME).service || true" >> $(SPEC_FILE)
-	@echo "systemctl daemon-reload" >> $(SPEC_FILE)
-endif
 endif
 
 # Create the package
@@ -247,7 +199,6 @@ ifeq ($(OS),Darwin)
 		$(PACKAGE_NAME)
 else
 	@echo "Creating Linux $(PACKAGE_FORMAT) package for $(ARCH)..."
-ifeq ($(PACKAGE_FORMAT),deb)
 	# Ensure proper Debian package file permissions
 	@chmod 755 $(DEBIAN_DIR)
 	@chmod 644 $(DEBIAN_CONTROL)
@@ -268,21 +219,6 @@ ifeq ($(PACKAGE_FORMAT),deb)
 	# Use dpkg-deb with proper settings
 	@dpkg-deb --build --root-owner-group $(BUILD_DIR) ./$(PACKAGE_NAME)
 	@echo "Created package: $(PACKAGE_NAME)"
-else ifeq ($(PACKAGE_FORMAT),rpm)
-	@mkdir -p $(RPM_BUILDROOT)
-	@cp -r $(INSTALL_DIR) $(RPM_BUILDROOT)/opt/
-	@cp -r $(CONFIG_DIR) $(RPM_BUILDROOT)/etc/
-	@mkdir -p $(RPM_BUILDROOT)/etc/systemd/system
-	@cp $(SYSTEMD_SERVICE) $(RPM_BUILDROOT)/etc/systemd/system/
-	@mkdir -p $(RPM_BUILDROOT)/var/log/$(NAME)
-	@rpmbuild --define "_topdir $(RPM_BUILD_DIR)" \
-		--define "_build_arch $(ARCH)" \
-		--define "_target_cpu $(if $(filter arm64,$(ARCH)),aarch64,$(ARCH))" \
-		--define "_target_os linux" \
-		-bb $(SPEC_FILE)
-	@mkdir -p $(dir $(PACKAGE_NAME))
-	@cp $(RPM_BUILD_DIR)/RPMS/$(if $(filter arm64,$(ARCH)),aarch64,$(ARCH))/$(NAME)-$(VERSION)-$(RPM_RELEASE).$(if $(filter arm64,$(ARCH)),aarch64,$(ARCH)).rpm ./$(PACKAGE_NAME)
-endif
 endif
 
 # Install the package
@@ -292,11 +228,7 @@ ifeq ($(OS),Darwin)
 	@sudo installer -pkg $(PACKAGE_NAME) -target /
 else
 	@echo "Installing Linux $(PACKAGE_FORMAT) package for $(ARCH)..."
-ifeq ($(PACKAGE_FORMAT),deb)
 	@sudo dpkg -i $(PACKAGE_NAME)
-else ifeq ($(PACKAGE_FORMAT),rpm)
-	@sudo rpm -i $(PACKAGE_NAME)
-endif
 endif
 
 # Uninstall the package
@@ -309,24 +241,20 @@ ifeq ($(OS),Darwin)
 	@sudo rm -rf /etc/$(NAME)
 else
 	@echo "Uninstalling from Linux..."
-ifeq ($(PACKAGE_FORMAT),deb)
 	@sudo dpkg -r $(NAME)
-else ifeq ($(PACKAGE_FORMAT),rpm)
-	@sudo rpm -e $(NAME)
-endif
 endif
 
 # Clean build directory for current architecture
 clean:
 	@echo "Cleaning build directory for $(ARCH)..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb $(NAME)*$(ARCH).rpm
+	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb
 
 # Clean all build directories
 clean-all:
 	@echo "Cleaning all build directories..."
 	@rm -rf build
-	@rm -f $(NAME)*.pkg $(NAME)*.deb $(NAME)*.rpm
+	@rm -f $(NAME)*.pkg $(NAME)*.deb
 
 # Test
 test:
@@ -342,7 +270,7 @@ fmt:
 help:
 	@echo "Available targets:"
 	@echo "  all        - Clean, build and package for current architecture ($(ARCH))"
-	@echo "  all-arch   - Build and package for all architectures (amd64, arm64) and formats (deb,rpm)"
+	@echo "  all-arch   - Build and package for all architectures (amd64, arm64)"
 	@echo "  build      - Build the binary for current architecture"
 	@echo "  prepare-package - Prepare the package structure"
 	@echo "  package    - Create the package"
@@ -359,7 +287,7 @@ help:
 	@echo "  Supported architectures: amd64, arm64"
 	@echo ""
 	@echo "Package format can be specified with PACKAGE_FORMAT=<format>"
-	@echo "  Example: make PACKAGE_FORMAT=rpm"
-	@echo "  Supported formats on Linux: deb, rpm"
+	@echo "  Example: make PACKAGE_FORMAT=deb"
+	@echo "  Supported formats on Linux: deb"
 
 .PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help
