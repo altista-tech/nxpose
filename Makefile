@@ -205,6 +205,7 @@ else ifeq ($(PACKAGE_FORMAT),rpm)
 	@echo "Group: Applications/Internet" >> $(SPEC_FILE)
 	@echo "License: MIT" >> $(SPEC_FILE)
 	@echo "BuildArch: $(ARCH)" >> $(SPEC_FILE)
+	@echo "AutoReqProv: no" >> $(SPEC_FILE)
 	@echo "" >> $(SPEC_FILE)
 	@echo "%description" >> $(SPEC_FILE)
 	@echo "A secure tunneling service to expose local services to the internet." >> $(SPEC_FILE)
@@ -274,7 +275,11 @@ else ifeq ($(PACKAGE_FORMAT),rpm)
 	@mkdir -p $(RPM_BUILDROOT)/etc/systemd/system
 	@cp $(SYSTEMD_SERVICE) $(RPM_BUILDROOT)/etc/systemd/system/
 	@mkdir -p $(RPM_BUILDROOT)/var/log/$(NAME)
-	@rpmbuild --define "_topdir $(RPM_BUILD_DIR)" -bb $(SPEC_FILE)
+	@rpmbuild --define "_topdir $(RPM_BUILD_DIR)" \
+		--define "_build_arch $(ARCH)" \
+		--define "_target_cpu $(if $(filter arm64,$(ARCH)),aarch64,$(ARCH))" \
+		--define "_target_os linux" \
+		-bb $(SPEC_FILE)
 	@cp $(RPM_BUILD_DIR)/RPMS/$(ARCH)/$(NAME)-$(VERSION)-1.$(ARCH).rpm ./$(NAME)_$(VERSION)_$(ARCH).rpm
 endif
 endif

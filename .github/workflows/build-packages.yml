@@ -30,7 +30,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential rpm alien
+          sudo apt-get install -y build-essential rpm alien rpm-build
+          # Install cross-compilation dependencies for RPM
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          fi
 
       - name: Create systemd service file
         run: |
@@ -71,41 +75,31 @@ jobs:
           # Add version to the build
           sed -i "s/VERSION := 1.0.0/VERSION := $VERSION/g" Makefile
 
+          # Set up RPM build environment
+          if [ "${{ matrix.format }}" = "rpm" ]; then
+            mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+            echo "%_topdir %(echo $HOME)/rpmbuild" > ~/.rpmmacros
+            if [ "${{ matrix.arch }}" = "arm64" ]; then
+              echo "%_target_cpu aarch64" >> ~/.rpmmacros
+              echo "%_target_os linux" >> ~/.rpmmacros
+            fi
+          fi
+
           # Build package
           make ARCH=${{ matrix.arch }} PACKAGE_FORMAT=${{ matrix.format }}
           
           # List created packages
           ls -la nxpose*.${{ matrix.format }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nxpose-${{ matrix.arch }}-${{ matrix.format }}
-          path: nxpose*.${{ matrix.format }}
-          retention-days: 7
-
-  upload-to-minio:
-    name: Upload to MinIO S3
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' # Only upload on push to main or tags
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: List packages
-        run: find dist -type f | sort
-
       - name: Install MinIO client
+        if: github.event_name != 'pull_request'
         run: |
           curl -LO https://dl.min.io/client/mc/release/linux-amd64/mc
           chmod +x mc
           ./mc --version
 
       - name: Configure MinIO client
+        if: github.event_name != 'pull_request'
         env:
           MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
           MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
@@ -113,7 +107,8 @@ jobs:
         run: |
           ./mc alias set minio $MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
 
-      - name: Upload packages to MinIO
+      - name: Upload package to MinIO
+        if: github.event_name != 'pull_request'
         run: |
           # Set version from git tag or use a default
           VERSION=${GITHUB_REF#refs/tags/v}
@@ -124,14 +119,15 @@ jobs:
           # Create bucket if it doesn't exist
           ./mc mb --ignore-existing minio/nxpose-packages
           
-          # Upload packages
-          find dist -type f -name "*.deb" -o -name "*.rpm" | while read -r pkg; do
-            filename=$(basename "$pkg")
-            # Upload to version-specific path
-            ./mc cp "$pkg" "minio/nxpose-packages/$VERSION/$filename"
-            # If this is a tag release, also copy to 'latest' path
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-              ./mc cp "$pkg" "minio/nxpose-packages/latest/$filename"
+          # Upload the package
+          for pkg in nxpose*.${{ matrix.format }}; do
+            if [ -f "$pkg" ]; then
+              # Upload to version-specific path
+              ./mc cp "$pkg" "minio/nxpose-packages/$VERSION/$pkg"
+              # If this is a tag release, also copy to 'latest' path
+              if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+                ./mc cp "$pkg" "minio/nxpose-packages/latest/$pkg"
+              fi
+              echo "Uploaded $pkg to MinIO S3"
             fi
-            echo "Uploaded $filename to MinIO S3"
           done 
