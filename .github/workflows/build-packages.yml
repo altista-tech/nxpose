@@ -85,24 +85,30 @@ jobs:
           # List created packages
           ls -la nxpose*.deb
 
-      - name: Install MinIO client
+      - name: Install AWS CLI
         if: github.event_name != 'pull_request'
         run: |
-          curl -LO https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          ./mc --version
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
 
-      - name: Configure MinIO client
+      - name: Configure AWS CLI for DigitalOcean Spaces
         if: github.event_name != 'pull_request'
         env:
-          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
-          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
-          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
+          DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
+          DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
         run: |
-          ./mc alias set minio $MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
+          aws configure set aws_access_key_id $DO_SPACES_KEY
+          aws configure set aws_secret_access_key $DO_SPACES_SECRET
+          aws configure set default.region us-east-1
+          # The us-east-1 region is used by default with DigitalOcean Spaces
 
-      - name: Upload package to MinIO
+      - name: Upload package to DigitalOcean Spaces
         if: github.event_name != 'pull_request'
+        env:
+          DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
+          DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
         run: |
           # Set version from git tag or use a default for S3 path
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -111,18 +117,15 @@ jobs:
             S3_VERSION="latest"
           fi
           
-          # Create bucket if it doesn't exist
-          ./mc mb --ignore-existing minio/nxpose-packages
-          
-          # Upload the package
+          # Upload the package using AWS CLI with DigitalOcean Spaces endpoint
           for pkg in nxpose*.deb; do
             if [ -f "$pkg" ]; then
               # Upload to version-specific path
-              ./mc cp "$pkg" "minio/nxpose-packages/$S3_VERSION/$pkg"
+              aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/$S3_VERSION/$pkg" --endpoint=https://${DO_SPACES_ENDPOINT}
               # If this is a tag release, also copy to 'latest' path
               if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-                ./mc cp "$pkg" "minio/nxpose-packages/latest/$pkg"
+                aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/latest/$pkg" --endpoint=https://${DO_SPACES_ENDPOINT}
               fi
-              echo "Uploaded $pkg to MinIO S3"
+              echo "Uploaded $pkg to DigitalOcean Spaces"
             fi
           done 
