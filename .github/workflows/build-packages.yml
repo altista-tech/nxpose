@@ -68,13 +68,33 @@ jobs:
       - name: Build and package for ${{ matrix.arch }} (${{ matrix.format }})
         run: |
           # Set version from git tag or use a default
-          VERSION=${GITHUB_REF#refs/tags/v}
-          if [[ "$VERSION" == "$GITHUB_REF" ]]; then
-            VERSION="1.0.0-dev.$(date +%Y%m%d%H%M%S)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            # For non-tag builds, use different version formats for RPM and DEB
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            if [ "${{ matrix.format }}" = "rpm" ]; then
+              # RPM doesn't allow hyphens in version, use different format
+              VERSION="1.0.0"
+              RELEASE="0.dev.${TIMESTAMP}"
+            else
+              VERSION="1.0.0-dev.${TIMESTAMP}"
+              RELEASE="1"
+            fi
           fi
           
-          # Add version to the build
-          sed -i "s/VERSION := 1.0.0/VERSION := $VERSION/g" Makefile
+          # For RPM, we need to handle version and release separately
+          if [ "${{ matrix.format }}" = "rpm" ]; then
+            # Set version and release in Makefile
+            sed -i "s/VERSION := 1.0.0/VERSION := ${VERSION}/" Makefile
+            # Add RPM_RELEASE variable to the build
+            if [ -n "${RELEASE}" ]; then
+              echo "RPM_RELEASE := ${RELEASE}" >> Makefile
+            fi
+          else
+            # For DEB and other formats, just set the version
+            sed -i "s/VERSION := 1.0.0/VERSION := ${VERSION}/" Makefile
+          fi
 
           # Set up RPM build environment
           if [ "${{ matrix.format }}" = "rpm" ]; then
@@ -111,10 +131,11 @@ jobs:
       - name: Upload package to MinIO
         if: github.event_name != 'pull_request'
         run: |
-          # Set version from git tag or use a default
-          VERSION=${GITHUB_REF#refs/tags/v}
-          if [[ "$VERSION" == "$GITHUB_REF" ]]; then
-            VERSION="latest"
+          # Set version from git tag or use a default for S3 path
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            S3_VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            S3_VERSION="latest"
           fi
           
           # Create bucket if it doesn't exist
@@ -124,7 +145,7 @@ jobs:
           for pkg in nxpose*.${{ matrix.format }}; do
             if [ -f "$pkg" ]; then
               # Upload to version-specific path
-              ./mc cp "$pkg" "minio/nxpose-packages/$VERSION/$pkg"
+              ./mc cp "$pkg" "minio/nxpose-packages/$S3_VERSION/$pkg"
               # If this is a tag release, also copy to 'latest' path
               if [[ "$GITHUB_REF" == refs/tags/* ]]; then
                 ./mc cp "$pkg" "minio/nxpose-packages/latest/$pkg"

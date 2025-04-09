@@ -5,6 +5,8 @@
 # Variables
 NAME := nxpose
 VERSION := 1.0.0
+# Default RPM release number
+RPM_RELEASE ?= 1
 GO := go
 GOFMT := gofmt
 GOBUILD := $(GO) build
@@ -48,7 +50,7 @@ else
   ifeq ($(PACKAGE_FORMAT),deb)
     PACKAGE_NAME := $(NAME)_$(VERSION)_$(ARCH).$(PACKAGE_FORMAT)
   else ifeq ($(PACKAGE_FORMAT),rpm)
-    PACKAGE_NAME := $(NAME)-$(VERSION)-1.$(ARCH).$(PACKAGE_FORMAT)
+    PACKAGE_NAME := $(NAME)-$(VERSION)-$(RPM_RELEASE).$(ARCH).$(PACKAGE_FORMAT)
   else ifeq ($(PACKAGE_FORMAT),apk)
     PACKAGE_NAME := $(NAME)-$(VERSION)-r0.$(ARCH).$(PACKAGE_FORMAT)
   endif
@@ -200,7 +202,7 @@ else ifeq ($(PACKAGE_FORMAT),rpm)
 	@mkdir -p $(RPM_BUILD_DIR)/SPECS $(RPM_BUILD_DIR)/SOURCES $(RPM_BUILD_DIR)/RPMS $(RPM_BUILD_DIR)/SRPMS $(RPM_BUILD_DIR)/BUILD
 	@echo "Name: $(NAME)" > $(SPEC_FILE)
 	@echo "Version: $(VERSION)" >> $(SPEC_FILE)
-	@echo "Release: 1" >> $(SPEC_FILE)
+	@echo "Release: $(RPM_RELEASE)" >> $(SPEC_FILE)
 	@echo "Summary: nxpose tunneling server" >> $(SPEC_FILE)
 	@echo "Group: Applications/Internet" >> $(SPEC_FILE)
 	@echo "License: MIT" >> $(SPEC_FILE)
@@ -280,7 +282,8 @@ else ifeq ($(PACKAGE_FORMAT),rpm)
 		--define "_target_cpu $(if $(filter arm64,$(ARCH)),aarch64,$(ARCH))" \
 		--define "_target_os linux" \
 		-bb $(SPEC_FILE)
-	@cp $(RPM_BUILD_DIR)/RPMS/$(ARCH)/$(NAME)-$(VERSION)-1.$(ARCH).rpm ./$(NAME)_$(VERSION)_$(ARCH).rpm
+	@mkdir -p $(dir $(PACKAGE_NAME))
+	@cp $(RPM_BUILD_DIR)/RPMS/$(if $(filter arm64,$(ARCH)),aarch64,$(ARCH))/$(NAME)-$(VERSION)-$(RPM_RELEASE).$(if $(filter arm64,$(ARCH)),aarch64,$(ARCH)).rpm ./$(PACKAGE_NAME)
 endif
 endif
 
