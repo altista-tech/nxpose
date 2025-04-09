@@ -2,7 +2,7 @@ name: Build and Package nxpose
 
 on:
   push:
-    branches: *
+    branches: [ main, feature/202503-01-redis-session ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
