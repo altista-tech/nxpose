@@ -19,19 +19,24 @@ import (
 
 // TunnelManager maintains and controls multiple active tunnels
 type TunnelManager struct {
-	tunnels    map[string]*ManagedTunnel
-	mu         sync.RWMutex
-	log        *logrus.Logger
-	configDir  string
-	maxTunnels int
-	ctx        context.Context
-	cancel     context.CancelFunc
-	stopWait   sync.WaitGroup
+	tunnels           map[string]*ManagedTunnel
+	userTunnels       map[string]map[string]struct{} // Maps user ID to set of tunnel IDs
+	mu                sync.RWMutex
+	log               *logrus.Logger
+	configDir         string
+	maxTunnels        int
+	maxTunnelsPerUser int
+	maxConnectionTime time.Duration
+	ctx               context.Context
+	cancel            context.CancelFunc
+	stopWait          sync.WaitGroup
+	redisClient       interface{} // Redis client for tracking user tunnels, if available
 }
 
 // ManagedTunnel represents a tunnel being managed
 type ManagedTunnel struct {
 	ID            string
+	UserID        string // User who created the tunnel
 	Protocol      string
 	LocalPort     int
 	PublicURL     string
@@ -40,6 +45,7 @@ type ManagedTunnel struct {
 	Created       time.Time
 	LastActive    time.Time
 	Active        bool
+	ExpiresAt     time.Time // Time when the tunnel will expire
 	CertData      []byte
 	tunnel        *Tunnel
 	reconnectChan chan struct{}
@@ -49,6 +55,7 @@ type ManagedTunnel struct {
 // TunnelInfo provides public information about a managed tunnel
 type TunnelInfo struct {
 	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
 	Protocol   string    `json:"protocol"`
 	LocalPort  int       `json:"local_port"`
 	PublicURL  string    `json:"public_url"`
@@ -57,6 +64,7 @@ type TunnelInfo struct {
 	Created    time.Time `json:"created"`
 	LastActive time.Time `json:"last_active"`
 	Active     bool      `json:"active"`
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 
 // TunnelSaveData represents the data saved to disk for persistence
@@ -67,6 +75,7 @@ type TunnelSaveData struct {
 // ManagedTunnelData represents the serializable data for a managed tunnel
 type ManagedTunnelData struct {
 	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
 	Protocol   string    `json:"protocol"`
 	LocalPort  int       `json:"local_port"`
 	PublicURL  string    `json:"public_url"`
@@ -74,20 +83,36 @@ type ManagedTunnelData struct {
 	ServerPort int       `json:"server_port"`
 	Created    time.Time `json:"created"`
 	LastActive time.Time `json:"last_active"`
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 	CertPath   string    `json:"cert_path,omitempty"`
 }
 
 // NewTunnelManager creates a new tunnel manager
-func NewTunnelManager(configDir string, maxTunnels int) *TunnelManager {
+func NewTunnelManager(configDir string, maxTunnels int, maxTunnelsPerUser int, maxConnectionTime string) *TunnelManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Parse max connection time
+	var duration time.Duration
+	if maxConnectionTime != "" {
+		var err error
+		duration, err = time.ParseDuration(maxConnectionTime)
+		if err != nil {
+			// Log error but continue with zero duration (no limit)
+			logrus.Warnf("Invalid max connection time format: %s, using no limit", maxConnectionTime)
+			duration = 0
+		}
+	}
+
 	manager := &TunnelManager{
-		tunnels:    make(map[string]*ManagedTunnel),
-		log:        logrus.New(),
-		configDir:  configDir,
-		maxTunnels: maxTunnels,
-		ctx:        ctx,
-		cancel:     cancel,
+		tunnels:           make(map[string]*ManagedTunnel),
+		userTunnels:       make(map[string]map[string]struct{}),
+		log:               logrus.New(),
+		configDir:         configDir,
+		maxTunnels:        maxTunnels,
+		maxTunnelsPerUser: maxTunnelsPerUser,
+		maxConnectionTime: duration,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 
 	// Configure logger
@@ -248,29 +273,55 @@ func (tm *TunnelManager) autosaveRoutine() {
 
 // cleanupStaleTunnels removes or reconnects inactive tunnels
 func (tm *TunnelManager) cleanupStaleTunnels() {
-	now := time.Now()
-	inactiveThreshold := 30 * time.Minute
-
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
+	now := time.Now()
 	for id, tunnel := range tm.tunnels {
-		// Skip active tunnels
-		if tunnel.Active {
-			continue
-		}
+		// Check if tunnel is expired based on max connection time
+		if !tunnel.ExpiresAt.IsZero() && now.After(tunnel.ExpiresAt) {
+			tm.log.Infof("Removing expired tunnel %s", id)
 
-		// If the tunnel has been inactive for too long, remove it
-		if now.Sub(tunnel.LastActive) > inactiveThreshold {
-			tm.log.Infof("Removing stale tunnel %s (inactive for %v)", id, now.Sub(tunnel.LastActive))
+			// Close the tunnel if it's active
+			if tunnel.Active {
+				close(tunnel.stopChan)
+				if tunnel.tunnel != nil {
+					_ = tunnel.tunnel.Stop()
+				}
+			}
+
+			// Remove from userTunnels map
+			if tunnel.UserID != "" {
+				if tunnels, exists := tm.userTunnels[tunnel.UserID]; exists {
+					delete(tunnels, id)
+
+					// Remove user entry if they have no more tunnels
+					if len(tunnels) == 0 {
+						delete(tm.userTunnels, tunnel.UserID)
+					}
+				}
+
+				// If Redis client is available, decrement the user's tunnel count
+				if tm.redisClient != nil {
+					if redisClient, ok := tm.redisClient.(interface {
+						DecrementTunnelCount(userID string) (int, error)
+					}); ok {
+						_, err := redisClient.DecrementTunnelCount(tunnel.UserID)
+						if err != nil {
+							tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+						}
+					}
+				}
+			}
+
+			// Remove from tunnels map
 			delete(tm.tunnels, id)
-			close(tunnel.stopChan)
 		}
 	}
 }
 
 // CreateTunnel creates a new tunnel and adds it to the manager
-func (tm *TunnelManager) CreateTunnel(protocol string, localPort int, serverHost string, serverPort int, certData []byte) (*TunnelInfo, error) {
+func (tm *TunnelManager) CreateTunnel(protocol string, localPort int, serverHost string, serverPort int, certData []byte, userID string) (*TunnelInfo, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -279,19 +330,52 @@ func (tm *TunnelManager) CreateTunnel(protocol string, localPort int, serverHost
 		return nil, fmt.Errorf("maximum number of tunnels reached (%d)", tm.maxTunnels)
 	}
 
-	// Check if a tunnel for this port already exists
-	for _, t := range tm.tunnels {
-		if t.LocalPort == localPort && t.Protocol == protocol {
-			return nil, fmt.Errorf("tunnel for %s port %d already exists", protocol, localPort)
+	// Check if user has reached their tunnel limit
+	if tm.maxTunnelsPerUser > 0 && userID != "" {
+		userTunnelCount := 0
+
+		// If Redis client is available, use it to get the user's tunnel count
+		if tm.redisClient != nil {
+			if redisClient, ok := tm.redisClient.(interface {
+				GetTunnelCount(userID string) (int, error)
+			}); ok {
+				count, err := redisClient.GetTunnelCount(userID)
+				if err != nil {
+					tm.log.Warnf("Failed to get tunnel count from Redis: %v", err)
+				} else {
+					userTunnelCount = count
+				}
+			}
+		} else {
+			// Otherwise use in-memory tracking
+			if tunnels, exists := tm.userTunnels[userID]; exists {
+				userTunnelCount = len(tunnels)
+			}
+		}
+
+		if userTunnelCount >= tm.maxTunnelsPerUser {
+			return nil, fmt.Errorf("maximum number of tunnels per user reached (%d)", tm.maxTunnelsPerUser)
 		}
 	}
 
-	// Generate tunnel ID
-	id := uuid.New().String()
+	// Check if tunnel already exists for this port
+	for _, t := range tm.tunnels {
+		if t.Protocol == protocol && t.LocalPort == localPort {
+			return nil, fmt.Errorf("tunnel already exists for %s port %d", protocol, localPort)
+		}
+	}
 
-	// Create the tunnel
-	managedTunnel := &ManagedTunnel{
+	// Set up expiration time if max connection time is set
+	var expiresAt time.Time
+	if tm.maxConnectionTime > 0 {
+		expiresAt = time.Now().Add(tm.maxConnectionTime)
+	}
+
+	// Create a new tunnel entry
+	id := uuid.New().String()
+	mt := &ManagedTunnel{
 		ID:            id,
+		UserID:        userID,
 		Protocol:      protocol,
 		LocalPort:     localPort,
 		ServerHost:    serverHost,
@@ -299,58 +383,64 @@ func (tm *TunnelManager) CreateTunnel(protocol string, localPort int, serverHost
 		Created:       time.Now(),
 		LastActive:    time.Now(),
 		Active:        false,
+		ExpiresAt:     expiresAt,
 		CertData:      certData,
 		reconnectChan: make(chan struct{}, 1),
 		stopChan:      make(chan struct{}),
 	}
 
-	// Try to expose the service with retries
-	maxRetries := 3
-	var publicURL, tunnelID string
-	var err error
-
-	for i := 0; i < maxRetries; i++ {
-		tm.log.Infof("Attempting to expose local service (attempt %d/%d)...", i+1, maxRetries)
-
-		publicURL, tunnelID, err = ExposeLocalService(protocol, localPort, certData, serverHost, serverPort)
-		if err == nil {
-			break // Success, exit retry loop
+	// Set the tunnel public URL
+	switch protocol {
+	case "http", "https":
+		host := id
+		if protocol == "https" {
+			host += "-s"
 		}
+		mt.PublicURL = fmt.Sprintf("%s://%s.%s", protocol, host, serverHost)
+	case "tcp":
+		// For TCP, the public URL is the server host and port
+		mt.PublicURL = fmt.Sprintf("tcp://%s:%d", serverHost, serverPort)
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
+	}
 
-		tm.log.Warnf("Failed to expose service (attempt %d/%d): %v", i+1, maxRetries, err)
+	// Add the tunnel to our maps
+	tm.tunnels[id] = mt
 
-		if i < maxRetries-1 {
-			// Wait before retrying with exponential backoff
-			backoff := time.Duration((i+1)*(i+1)) * time.Second
-			tm.log.Infof("Retrying in %v...", backoff)
-			time.Sleep(backoff)
+	// Track tunnel by user ID if provided
+	if userID != "" {
+		if _, exists := tm.userTunnels[userID]; !exists {
+			tm.userTunnels[userID] = make(map[string]struct{})
+		}
+		tm.userTunnels[userID][id] = struct{}{}
+
+		// If Redis client is available, increment the user's tunnel count
+		if tm.redisClient != nil {
+			if redisClient, ok := tm.redisClient.(interface {
+				IncrementTunnelCount(userID string) (int, error)
+				SetTunnelExpiry(tunnelID string, duration time.Duration) error
+			}); ok {
+				_, err := redisClient.IncrementTunnelCount(userID)
+				if err != nil {
+					tm.log.Warnf("Failed to increment tunnel count in Redis: %v", err)
+				}
+
+				// Set tunnel expiry in Redis if max connection time is set
+				if !expiresAt.IsZero() {
+					duration := time.Until(expiresAt)
+					err := redisClient.SetTunnelExpiry(id, duration)
+					if err != nil {
+						tm.log.Warnf("Failed to set tunnel expiry in Redis: %v", err)
+					}
+				}
+			}
 		}
 	}
 
-	// If all retries failed
-	if err != nil {
-		return nil, fmt.Errorf("failed to expose local service after %d attempts: %w", maxRetries, err)
-	}
+	// Start the tunnel
+	go tm.startTunnel(mt)
 
-	// Validate the response
-	if tunnelID == "" || publicURL == "" {
-		return nil, fmt.Errorf("server returned invalid tunnel data: missing tunnel ID or public URL")
-	}
-
-	// Update with server-provided ID and URL
-	tm.log.Infof("Successfully created tunnel with ID %s and URL %s", tunnelID, publicURL)
-	managedTunnel.ID = tunnelID // Use the server-provided tunnelID
-	managedTunnel.PublicURL = publicURL
-	tm.tunnels[tunnelID] = managedTunnel // Store with tunnelID from server
-
-	// Start the tunnel asynchronously
-	go tm.startTunnel(managedTunnel)
-
-	// Save tunnels configuration
-	go tm.SaveTunnels()
-
-	// Return tunnel info
-	return tm.getTunnelInfo(managedTunnel), nil
+	return tm.getTunnelInfo(mt), nil
 }
 
 // startTunnel starts a managed tunnel
@@ -454,28 +544,47 @@ func (tm *TunnelManager) GetTunnelByPort(protocol string, port int) (*TunnelInfo
 // RemoveTunnel stops and removes a tunnel from the manager
 func (tm *TunnelManager) RemoveTunnel(id string) bool {
 	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
 	tunnel, exists := tm.tunnels[id]
 	if !exists {
-		tm.mu.Unlock()
 		return false
 	}
 
-	// Signal the tunnel to stop
-	close(tunnel.stopChan)
-
-	// Clean up resources
-	if tunnel.tunnel != nil {
-		tunnel.tunnel.Stop()
+	// Close the tunnel if it's active
+	if tunnel.Active {
+		close(tunnel.stopChan)
+		if tunnel.tunnel != nil {
+			_ = tunnel.tunnel.Stop()
+		}
 	}
 
-	// Remove from manager
+	// Remove from userTunnels map
+	if tunnel.UserID != "" {
+		if tunnels, exists := tm.userTunnels[tunnel.UserID]; exists {
+			delete(tunnels, id)
+
+			// Remove user entry if they have no more tunnels
+			if len(tunnels) == 0 {
+				delete(tm.userTunnels, tunnel.UserID)
+			}
+		}
+
+		// If Redis client is available, decrement the user's tunnel count
+		if tm.redisClient != nil {
+			if redisClient, ok := tm.redisClient.(interface {
+				DecrementTunnelCount(userID string) (int, error)
+			}); ok {
+				_, err := redisClient.DecrementTunnelCount(tunnel.UserID)
+				if err != nil {
+					tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+				}
+			}
+		}
+	}
+
+	// Remove from tunnels map
 	delete(tm.tunnels, id)
-	tm.mu.Unlock()
-
-	tm.log.Infof("Removed tunnel %s", id)
-
-	// Save updated configuration
-	go tm.SaveTunnels()
 
 	return true
 }
@@ -528,6 +637,7 @@ func (tm *TunnelManager) ListTunnels() []*TunnelInfo {
 func (tm *TunnelManager) getTunnelInfo(tunnel *ManagedTunnel) *TunnelInfo {
 	return &TunnelInfo{
 		ID:         tunnel.ID,
+		UserID:     tunnel.UserID,
 		Protocol:   tunnel.Protocol,
 		LocalPort:  tunnel.LocalPort,
 		PublicURL:  tunnel.PublicURL,
@@ -536,6 +646,7 @@ func (tm *TunnelManager) getTunnelInfo(tunnel *ManagedTunnel) *TunnelInfo {
 		Created:    tunnel.Created,
 		LastActive: tunnel.LastActive,
 		Active:     tunnel.Active,
+		ExpiresAt:  tunnel.ExpiresAt,
 	}
 }
 
@@ -570,6 +681,7 @@ func (tm *TunnelManager) SaveTunnels() error {
 		// Add tunnel data
 		tunnelData.Tunnels = append(tunnelData.Tunnels, ManagedTunnelData{
 			ID:         tunnel.ID,
+			UserID:     tunnel.UserID,
 			Protocol:   tunnel.Protocol,
 			LocalPort:  tunnel.LocalPort,
 			PublicURL:  tunnel.PublicURL,
@@ -577,6 +689,7 @@ func (tm *TunnelManager) SaveTunnels() error {
 			ServerPort: tunnel.ServerPort,
 			Created:    tunnel.Created,
 			LastActive: tunnel.LastActive,
+			ExpiresAt:  tunnel.ExpiresAt,
 			CertPath:   certPath,
 		})
 	}
@@ -637,6 +750,7 @@ func (tm *TunnelManager) LoadTunnels() error {
 		// Create managed tunnel
 		managedTunnel := &ManagedTunnel{
 			ID:            td.ID,
+			UserID:        td.UserID,
 			Protocol:      td.Protocol,
 			LocalPort:     td.LocalPort,
 			PublicURL:     td.PublicURL,
@@ -645,6 +759,7 @@ func (tm *TunnelManager) LoadTunnels() error {
 			Created:       td.Created,
 			LastActive:    td.LastActive,
 			Active:        false,
+			ExpiresAt:     td.ExpiresAt,
 			CertData:      certData,
 			reconnectChan: make(chan struct{}, 1),
 			stopChan:      make(chan struct{}),
@@ -741,4 +856,28 @@ func (tm *TunnelManager) Close() error {
 
 	tm.log.Info("Tunnel manager shut down")
 	return nil
+}
+
+// SetRedisClient sets the Redis client for the tunnel manager
+func (tm *TunnelManager) SetRedisClient(client interface{}) {
+	tm.redisClient = client
+}
+
+// GetTunnelsByUserID returns tunnels for a specific user
+func (tm *TunnelManager) GetTunnelsByUserID(userID string) []*TunnelInfo {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	result := make([]*TunnelInfo, 0)
+
+	if tunnels, exists := tm.userTunnels[userID]; exists {
+		for id := range tunnels {
+			if tunnel, exists := tm.tunnels[id]; exists {
+				info := tm.getTunnelInfo(tunnel)
+				result = append(result, info)
+			}
+		}
+	}
+
+	return result
 }

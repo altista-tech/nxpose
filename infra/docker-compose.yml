@@ -1,0 +1,55 @@
+version: '3'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nxpose-server
+    container_name: nxpose-server
+    restart: unless-stopped
+    ports:
+      - "${SERVER_PORT:-8443}:8443"
+    environment:
+      - NXPOSE_SERVER_BIND_ADDRESS=0.0.0.0
+      - NXPOSE_SERVER_PORT=8443
+      - NXPOSE_SERVER_DOMAIN=${NXPOSE_DOMAIN:-nxpose.example.com}
+      - NXPOSE_VERBOSE=${NXPOSE_VERBOSE:-false}
+      # TLS Configuration
+      - NXPOSE_TLS_CERT=/certs/server.crt
+      - NXPOSE_TLS_KEY=/certs/server.key
+      # OAuth2 Configuration
+      - NXPOSE_OAUTH2_ENABLED=${OAUTH2_ENABLED:-false}
+      - NXPOSE_OAUTH2_REDIRECT_URL=${OAUTH2_REDIRECT_URL:-https://nxpose.example.com/auth/callback}
+      - NXPOSE_OAUTH2_SESSION_KEY=${OAUTH2_SESSION_KEY:-changeme_session_key}
+      - NXPOSE_OAUTH2_SESSION_STORE=${OAUTH2_SESSION_STORE:-memory}
+      # GitHub OAuth (if enabled)
+      - NXPOSE_OAUTH2_PROVIDERS_GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - NXPOSE_OAUTH2_PROVIDERS_GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      # MongoDB Configuration (if enabled)
+      - NXPOSE_MONGODB_ENABLED=${MONGODB_ENABLED:-true}
+      - NXPOSE_MONGODB_URI=mongodb://${MONGO_APP_USERNAME:-nxpose}:${MONGO_APP_PASSWORD:-nxpose_secure_password}@mongodb:27017/${MONGO_DATABASE:-nxpose}
+      - NXPOSE_MONGODB_DATABASE=${MONGO_DATABASE:-nxpose}
+      # Redis Configuration (if enabled)
+      - NXPOSE_REDIS_ENABLED=${REDIS_ENABLED:-false}
+      - NXPOSE_REDIS_HOST=redis
+      - NXPOSE_REDIS_PORT=6379
+      - NXPOSE_REDIS_PASSWORD=${REDIS_PASSWORD:-redis_secure_password}
+      # Let's Encrypt Configuration
+      - NXPOSE_LETSENCRYPT_ENABLED=${LETSENCRYPT_ENABLED:-false}
+      - NXPOSE_LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@example.com}
+      - NXPOSE_LETSENCRYPT_ENVIRONMENT=${LETSENCRYPT_ENVIRONMENT:-production}
+    volumes:
+      - ${CERTS_PATH:-./certs}:/certs
+      - ${DATA_PATH:-./data}:/data
+      - ${CERTIFICATES_PATH:-./certificates}:/app/certificates
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - nxpose-network
+    command: ["nxpose-server"]
+
+networks:
+  nxpose-network:
+    name: nxpose-network 

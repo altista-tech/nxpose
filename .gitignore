@@ -4,3 +4,4 @@ CLAUDE.md
 vendor/
 .dlcatignore
 .vscode/
+.DS_store

@@ -26,6 +26,23 @@ type LetsEncryptConfig struct {
 	DNSCredentials map[string]string
 }
 
+// RedisConfig holds the configuration for Redis
+type RedisConfig struct {
+	Enabled   bool
+	Host      string
+	Port      int
+	Password  string
+	DB        int
+	KeyPrefix string
+	Timeout   time.Duration
+}
+
+// TunnelLimitsConfig holds the configuration for tunnel limits
+type TunnelLimitsConfig struct {
+	MaxPerUser    int
+	MaxConnection string // Format: "10s", "5m", "2h", etc.
+}
+
 // ServerConfig holds all configuration for the server
 type ServerConfig struct {
 	// Server settings
@@ -46,6 +63,12 @@ type ServerConfig struct {
 	// MongoDB settings
 	MongoDB MongoDBConfig
 
+	// Redis settings
+	Redis RedisConfig
+
+	// Tunnel limits
+	TunnelLimits TunnelLimitsConfig
+
 	// Let's Encrypt settings
 	LetsEncrypt LetsEncryptConfig
 }
@@ -56,7 +79,7 @@ type OAuth2Config struct {
 	Providers    []OAuth2ProviderConfig
 	RedirectURL  string
 	SessionKey   string
-	SessionStore string
+	SessionStore string // "memory", "mongo", or "redis"
 }
 
 // OAuth2ProviderConfig holds configuration for a specific OAuth2 provider
@@ -105,6 +128,19 @@ func DefaultServerConfig() *ServerConfig {
 			Database: "nxpose",
 			Timeout:  10 * time.Second,
 		},
+		Redis: RedisConfig{
+			Enabled:   false,
+			Host:      "localhost",
+			Port:      6379,
+			Password:  "",
+			DB:        0,
+			KeyPrefix: "nxpose:",
+			Timeout:   10 * time.Second,
+		},
+		TunnelLimits: TunnelLimitsConfig{
+			MaxPerUser:    5,
+			MaxConnection: "",
+		},
 		LetsEncrypt: LetsEncryptConfig{
 			Enabled:        false,
 			Email:          "",
@@ -137,6 +173,19 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 	viper.BindEnv("mongodb.uri", "NXPOSE_MONGODB_URI")
 	viper.BindEnv("mongodb.database", "NXPOSE_MONGODB_DATABASE")
 	viper.BindEnv("mongodb.timeout", "NXPOSE_MONGODB_TIMEOUT")
+
+	// Redis settings
+	viper.BindEnv("redis.enabled", "NXPOSE_REDIS_ENABLED")
+	viper.BindEnv("redis.host", "NXPOSE_REDIS_HOST")
+	viper.BindEnv("redis.port", "NXPOSE_REDIS_PORT")
+	viper.BindEnv("redis.password", "NXPOSE_REDIS_PASSWORD")
+	viper.BindEnv("redis.db", "NXPOSE_REDIS_DB")
+	viper.BindEnv("redis.key_prefix", "NXPOSE_REDIS_KEY_PREFIX")
+	viper.BindEnv("redis.timeout", "NXPOSE_REDIS_TIMEOUT")
+
+	// Tunnel limits
+	viper.BindEnv("tunnels.max_per_user", "NXPOSE_TUNNELS_MAX_PER_USER")
+	viper.BindEnv("tunnels.max_connection", "NXPOSE_TUNNELS_MAX_CONNECTION")
 
 	// Let's Encrypt settings
 	viper.BindEnv("letsencrypt.enabled", "NXPOSE_LETSENCRYPT_ENABLED")
@@ -307,6 +356,40 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 		config.MongoDB.Timeout = viper.GetDuration("mongodb.timeout")
 	}
 
+	// Redis settings
+	if viper.IsSet("redis.enabled") {
+		config.Redis.Enabled = viper.GetBool("redis.enabled")
+	}
+	if viper.IsSet("redis.host") {
+		config.Redis.Host = viper.GetString("redis.host")
+	}
+	if viper.IsSet("redis.port") {
+		config.Redis.Port = viper.GetInt("redis.port")
+	}
+	if viper.IsSet("redis.password") {
+		config.Redis.Password = viper.GetString("redis.password")
+	}
+	if viper.IsSet("redis.db") {
+		config.Redis.DB = viper.GetInt("redis.db")
+	}
+	if viper.IsSet("redis.key_prefix") {
+		config.Redis.KeyPrefix = viper.GetString("redis.key_prefix")
+	}
+	if viper.IsSet("redis.timeout") {
+		timeout, err := time.ParseDuration(viper.GetString("redis.timeout"))
+		if err == nil {
+			config.Redis.Timeout = timeout
+		}
+	}
+
+	// Tunnel limits
+	if viper.IsSet("tunnels.max_per_user") {
+		config.TunnelLimits.MaxPerUser = viper.GetInt("tunnels.max_per_user")
+	}
+	if viper.IsSet("tunnels.max_connection") {
+		config.TunnelLimits.MaxConnection = viper.GetString("tunnels.max_connection")
+	}
+
 	// Let's Encrypt settings
 	if viper.IsSet("letsencrypt.enabled") {
 		config.LetsEncrypt.Enabled = viper.GetBool("letsencrypt.enabled")
@@ -367,7 +450,20 @@ func SaveServerConfig(config *ServerConfig, filePath string) error {
 	viper.Set("mongodb.database", config.MongoDB.Database)
 	viper.Set("mongodb.timeout", config.MongoDB.Timeout)
 
-	// Let's Encrypt settings
+	// Redis settings
+	viper.Set("redis.enabled", config.Redis.Enabled)
+	viper.Set("redis.host", config.Redis.Host)
+	viper.Set("redis.port", config.Redis.Port)
+	viper.Set("redis.password", config.Redis.Password)
+	viper.Set("redis.db", config.Redis.DB)
+	viper.Set("redis.key_prefix", config.Redis.KeyPrefix)
+	viper.Set("redis.timeout", config.Redis.Timeout.String())
+
+	// Tunnel limits
+	viper.Set("tunnels.max_per_user", config.TunnelLimits.MaxPerUser)
+	viper.Set("tunnels.max_connection", config.TunnelLimits.MaxConnection)
+
+	// Set Let's Encrypt settings
 	viper.Set("letsencrypt.enabled", config.LetsEncrypt.Enabled)
 	viper.Set("letsencrypt.email", config.LetsEncrypt.Email)
 	if config.LetsEncrypt.Environment == crypto.StagingEnv {

@@ -46,6 +46,12 @@ oauth2:
   session_key: "change-this-to-a-random-secret-key"
 
   # Session store options
+  # Available options: "memory", "mongo", "redis"
+  # - "memory": In-memory session storage (not persistent, lost on server restart)
+  # - "mongo": Store sessions in MongoDB (requires MongoDB to be enabled)
+  # - "redis": Store sessions in Redis (requires Redis to be enabled)
+  session_store: "memory"
+
   token_duration: "5m"    # JWT token duration
   cookie_duration: "24h"  # Cookie duration
 
@@ -81,6 +87,29 @@ mongodb:
   # Connection timeout
   timeout: "10s"
 
+# Redis configuration for session storage and caching
+redis:
+  # Enable Redis storage
+  enabled: false
+
+  # Redis server host
+  host: "localhost"
+
+  # Redis server port
+  port: 6379
+
+  # Redis password (optional)
+  # password: ""
+
+  # Redis database number
+  db: 0
+
+  # Key prefix for Redis keys
+  key_prefix: "nxpose:"
+
+  # Connection timeout
+  timeout: "10s"
+
 # Let's Encrypt settings for automatic TLS certificates
 letsencrypt:
   # Enable Let's Encrypt integration
@@ -102,6 +131,15 @@ letsencrypt:
 tunnels:
   # Maximum number of tunnels per client
   max_per_client: 5
+
+  # Maximum number of tunnels per user
+  # Limits how many tunnels a single user can create across all their clients
+  max_per_user: 10
+
+  # Maximum connection time for tunnels
+  # Format: duration string like "10s", "5m", "2h", "24h", etc.
+  # Leave empty for no time limit
+  max_connection: ""
 
   # Tunnel expiration time in hours (default: 24)
   expiration_hours: 24

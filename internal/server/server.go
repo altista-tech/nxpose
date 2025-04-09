@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"nxpose/internal/crypto"
+	"nxpose/internal/tunnel"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ type Tunnel struct {
 	TargetPort  int
 	CreateTime  time.Time
 	LastActive  time.Time
+	ExpiresAt   time.Time
 	connections int64
 }
 
@@ -60,6 +62,7 @@ type Server struct {
 	router       *mux.Router
 	sessionStore sessions.Store
 	mongo        *MongoClient
+	redis        *RedisClient
 	authService  *OAuthService
 
 	mu         sync.Mutex
@@ -72,14 +75,38 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 	// Create the router
 	router := mux.NewRouter()
 
-	// Create a session store
+	// Create a session store based on configuration
 	var sessionStore sessions.Store
-	// If a session key is provided, use a secure cookie store
-	if config.OAuth2.SessionKey != "" {
+
+	// Session store selection based on configuration
+	switch config.OAuth2.SessionStore {
+	case "redis":
+		if !config.Redis.Enabled {
+			return nil, fmt.Errorf("Redis session store requested but Redis is not enabled")
+		}
+		var err error
+		sessionStore, err = CreateSessionStore(config.OAuth2.SessionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Redis session store: %w", err)
+		}
+		log.Infof("Using Redis for session storage")
+	case "mongo":
+		if !config.MongoDB.Enabled {
+			return nil, fmt.Errorf("MongoDB session store requested but MongoDB is not enabled")
+		}
+		// For MongoDB, we continue using cookie store but persist session data in MongoDB
+		// This would require a custom implementation, for now we fallback to memory
 		sessionStore = sessions.NewCookieStore([]byte(config.OAuth2.SessionKey))
-	} else {
-		// Otherwise, use an insecure cookie store (for development)
-		sessionStore = sessions.NewCookieStore([]byte("nxpose-insecure-session-key"))
+		log.Infof("Using MongoDB for session storage (via cookies)")
+	default: // "memory" or any other value
+		// If a session key is provided, use a secure cookie store
+		if config.OAuth2.SessionKey != "" {
+			sessionStore = sessions.NewCookieStore([]byte(config.OAuth2.SessionKey))
+		} else {
+			sessionStore = sessions.NewCookieStore([]byte("nxpose-insecure-session-key"))
+			log.Warnf("Using insecure session key; production deployments should specify a secure key")
+		}
+		log.Infof("Using in-memory session storage")
 	}
 
 	// Create a MongoDB client if MongoDB is enabled
@@ -100,6 +127,27 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 		}
 	}
 
+	// Create a Redis client if Redis is enabled
+	var redis *RedisClient
+	if config.Redis.Enabled {
+		redisConfig := RedisConfig{
+			Host:      config.Redis.Host,
+			Port:      config.Redis.Port,
+			Password:  config.Redis.Password,
+			DB:        config.Redis.DB,
+			KeyPrefix: config.Redis.KeyPrefix,
+			Timeout:   config.Redis.Timeout,
+		}
+
+		var err error
+		redis, err = NewRedisClient(redisConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Redis client: %w", err)
+		}
+
+		log.Infof("Connected to Redis at %s:%d", config.Redis.Host, config.Redis.Port)
+	}
+
 	server := &Server{
 		config:    config,
 		tlsConfig: tlsConfig,
@@ -111,6 +159,7 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 		router:       router,
 		sessionStore: sessionStore,
 		mongo:        mongo,
+		redis:        redis,
 		shutdownCh:   make(chan struct{}),
 	}
 
@@ -170,6 +219,21 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 
 			log.Info("OAuth2 authentication service initialized")
 		}
+	}
+
+	// Update tunnel manager initialization with user limits
+	tunnelConfigDir := filepath.Join(os.TempDir(), "nxpose", "tunnels")
+	tunnelManager := tunnel.NewTunnelManager(
+		tunnelConfigDir,
+		config.TunnelLimits.MaxPerUser, // Use MaxPerUser for the max tunnels limit
+		config.TunnelLimits.MaxPerUser,
+		config.TunnelLimits.MaxConnection,
+	)
+
+	// Set Redis client for the tunnel manager if Redis is enabled
+	if redis != nil {
+		tunnelManager.SetRedisClient(redis)
+		log.Info("Tunnel manager using Redis for tunnel limits")
 	}
 
 	return server, nil
@@ -587,6 +651,53 @@ func (s *Server) initCertificateManager(ctx context.Context) error {
 	return nil
 }
 
+// Add a periodic tunnel cleanup routine
+func (s *Server) startTunnelCleanupRoutine() {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupExpiredTunnels()
+			case <-s.shutdownCh:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+// Cleanup expired tunnels
+func (s *Server) cleanupExpiredTunnels() {
+	now := time.Now()
+
+	s.tunnels.mu.Lock()
+	defer s.tunnels.mu.Unlock()
+
+	for id, tunnel := range s.tunnels.tunnels {
+		// Skip tunnels without expiration
+		if tunnel.ExpiresAt.IsZero() {
+			continue
+		}
+
+		// Check if tunnel is expired
+		if now.After(tunnel.ExpiresAt) {
+			s.log.Infof("Removing expired tunnel %s", id)
+
+			// If Redis is enabled, decrement user's tunnel count
+			if s.redis != nil && tunnel.ClientID != "" {
+				_, err := s.redis.DecrementTunnelCount(tunnel.ClientID)
+				if err != nil {
+					s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+				}
+			}
+
+			// Remove tunnel
+			delete(s.tunnels.tunnels, id)
+		}
+	}
+}
+
 // Start starts the server, initializing HTTP and tunnel servers
 func (s *Server) Start() error {
 	s.mu.Lock()
@@ -632,6 +743,9 @@ func (s *Server) Start() error {
 			}
 		}
 	}
+
+	// Start tunnel cleanup routine
+	s.startTunnelCleanupRoutine()
 
 	// Now proceed with HTTP server setup
 	s.log.Info("Setting up HTTP servers...")
@@ -762,6 +876,13 @@ func (s *Server) Stop() error {
 	if s.mongo != nil {
 		if err := s.mongo.Close(); err != nil {
 			s.log.WithError(err).Error("Error closing MongoDB connection")
+		}
+	}
+
+	// Close Redis client if it exists
+	if s.redis != nil {
+		if err := s.redis.Close(); err != nil {
+			s.log.Errorf("Error closing Redis connection: %v", err)
 		}
 	}
 
@@ -941,11 +1062,71 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract user ID from session if available
+	var userID string
+	if s.authService != nil && s.config.OAuth2.Enabled {
+		// Get session from cookie
+		session, err := s.sessionStore.Get(r, "nxpose_session")
+		if err == nil && session.Values["user_id"] != nil {
+			if id, ok := session.Values["user_id"].(string); ok {
+				userID = id
+				s.log.Debugf("Found user ID in session: %s", userID)
+			}
+		}
+	}
+
+	// If no user ID in session but client ID is provided, use that as a fallback
+	if userID == "" && reqBody.ClientID != "" {
+		userID = reqBody.ClientID
+		s.log.Debugf("Using client ID as user ID: %s", userID)
+	}
+
+	// Check if user has reached tunnel limits
+	if userID != "" && s.config.TunnelLimits.MaxPerUser > 0 {
+		// Redis is preferred for checking limits if available
+		var tunnelCount int
+		if s.redis != nil {
+			count, err := s.redis.GetTunnelCount(userID)
+			if err != nil {
+				s.log.Warnf("Failed to get tunnel count from Redis: %v", err)
+			} else {
+				tunnelCount = count
+			}
+		} else {
+			// Otherwise count tunnels manually
+			s.tunnels.mu.RLock()
+			for _, t := range s.tunnels.tunnels {
+				if t.ClientID == userID {
+					tunnelCount++
+				}
+			}
+			s.tunnels.mu.RUnlock()
+		}
+
+		if tunnelCount >= s.config.TunnelLimits.MaxPerUser {
+			s.log.Warnf("User %s has reached tunnel limit of %d", userID, s.config.TunnelLimits.MaxPerUser)
+			http.Error(w, fmt.Sprintf("Maximum number of tunnels reached (%d)", s.config.TunnelLimits.MaxPerUser), http.StatusTooManyRequests)
+			return
+		}
+	}
+
 	// Generate tunnel ID
 	tunnelID := uuid.New().String()
 
 	// Generate a random subdomain
 	subdomain := generateRandomSubdomain(8)
+
+	// Calculate expiration time if max connection time is set
+	var expiresAt time.Time
+	if s.config.TunnelLimits.MaxConnection != "" {
+		duration, err := time.ParseDuration(s.config.TunnelLimits.MaxConnection)
+		if err == nil {
+			expiresAt = time.Now().Add(duration)
+			s.log.Debugf("Setting tunnel expiration to %s", expiresAt.Format(time.RFC3339))
+		} else {
+			s.log.Warnf("Invalid max connection time format: %s", s.config.TunnelLimits.MaxConnection)
+		}
+	}
 
 	// Create tunnel
 	tunnel := &Tunnel{
@@ -956,12 +1137,30 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		TargetPort: reqBody.Port,
 		CreateTime: time.Now(),
 		LastActive: time.Now(),
+		ExpiresAt:  expiresAt,
 	}
 
 	// Store tunnel
 	s.tunnels.mu.Lock()
 	s.tunnels.tunnels[tunnelID] = tunnel
 	s.tunnels.mu.Unlock()
+
+	// If Redis is enabled, track tunnel counts for limits
+	if s.redis != nil && userID != "" {
+		_, err := s.redis.IncrementTunnelCount(userID)
+		if err != nil {
+			s.log.Warnf("Failed to increment tunnel count in Redis: %v", err)
+		}
+
+		// Set tunnel expiry in Redis if max connection time is set
+		if !expiresAt.IsZero() {
+			duration := time.Until(expiresAt)
+			err := s.redis.SetTunnelExpiry(tunnelID, duration)
+			if err != nil {
+				s.log.Warnf("Failed to set tunnel expiry in Redis: %v", err)
+			}
+		}
+	}
 
 	// Check if HTTPS is available and requested
 	httpsAvailable := false

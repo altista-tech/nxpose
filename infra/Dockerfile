@@ -3,11 +3,11 @@ FROM golang:1.21-alpine AS builder
 WORKDIR /app
 
 # Copy go.mod and go.sum first for caching
-COPY go.mod go.sum ./
+COPY ../go.mod go.sum ./
 RUN go mod download
 
 # Copy the rest of the source code
-COPY . .
+COPY ../. .
 
 # Build the server binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o nxpose-server ./cmd/server

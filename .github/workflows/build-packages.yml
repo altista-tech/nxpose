@@ -1,123 +1,137 @@
-name: Build and Upload Packages
+name: Build and Package nxpose
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to build (optional, defaults to git tag or "dev")'
-        required: false
-        type: string
 
 jobs:
   build:
+    name: Build packages
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        format: [deb, rpm]
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0  # Fetch all history for proper versioning
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
+          check-latest: true
 
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           sudo apt-get update
-          sudo apt-get install -y build-essential
+          sudo apt-get install -y build-essential rpm alien
 
-      - name: Set VERSION env var
+      - name: Create systemd service file
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
-          elif [[ $GITHUB_REF == refs/tags/v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-          else
-            echo "VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")" >> $GITHUB_ENV
-          fi
-          echo "Building version: $VERSION"
+          cat > nxpose.service << 'EOF'
+          [Unit]
+          Description=nxpose tunneling server
+          After=network.target
+          StartLimitIntervalSec=0
 
-      - name: Build packages
-        run: make packages VERSION=${{ env.VERSION }}
+          [Service]
+          Type=simple
+          Restart=always
+          RestartSec=1
+          User=nxpose
+          Group=nxpose
+          ExecStart=/opt/nxpose/nxpose-server --config /etc/nxpose/server-config.yaml
+          WorkingDirectory=/opt/nxpose
+          Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          Environment="GODEBUG=netdns=go"
 
-      - name: List built packages
-        run: ls -la packages/
-
-      - name: Install s3cmd
-        run: |
-          sudo apt-get install -y s3cmd
-
-      - name: Upload to DO Spaces
-        env:
-          DO_SPACE_KEY: ${{ secrets.DO_SPACE_KEY }}
-          DO_SPACE_SECRET: ${{ secrets.DO_SPACE_SECRET }}
-          DO_SPACE_ENDPOINT: ${{ secrets.DO_SPACE_ENDPOINT }}
-          DO_SPACE_BUCKET: ${{ secrets.DO_SPACE_BUCKET }}
-        run: |
-          # Configure s3cmd
-          cat > ~/.s3cfg << EOF
-          [default]
-          access_key = ${DO_SPACE_KEY}
-          secret_key = ${DO_SPACE_SECRET}
-          host_base = ${DO_SPACE_ENDPOINT}
-          host_bucket = %(bucket)s.${DO_SPACE_ENDPOINT}
-          use_https = True
+          [Install]
+          WantedBy=multi-user.target
           EOF
-          
-          # Create directory for this version
-          UPLOAD_PATH="nxpose/${VERSION}"
-          
-          # Upload each package
-          for package in packages/*; do
-            filename=$(basename "$package")
-            s3cmd put "$package" "s3://${DO_SPACE_BUCKET}/${UPLOAD_PATH}/${filename}" --acl-public
-            echo "::notice ::Uploaded ${filename} to https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename}"
-          done
-          
-          # Create a simple index.html with links to all files
-          echo "<html><head><title>NXpose $VERSION Packages</title></head><body>" > index.html
-          echo "<h1>NXpose $VERSION Packages</h1><ul>" >> index.html
-          for package in packages/*; do
-            filename=$(basename "$package")
-            echo "<li><a href=\"https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename}\">${filename}</a></li>" >> index.html
-          done
-          echo "</ul></body></html>" >> index.html
-          
-          # Upload index.html
-          s3cmd put index.html "s3://${DO_SPACE_BUCKET}/${UPLOAD_PATH}/index.html" --acl-public
-          
-          # Output the index URL
-          echo "::notice ::Package index: https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/index.html"
-          
-      - name: Create GitHub Release with Links
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DO_SPACE_BUCKET: ${{ secrets.DO_SPACE_BUCKET }}
-          DO_SPACE_ENDPOINT: ${{ secrets.DO_SPACE_ENDPOINT }}
+
+      - name: Create default config
         run: |
-          UPLOAD_PATH="nxpose/${VERSION}"
-          INDEX_URL="https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/index.html"
+          mkdir -p etc/nxpose
+          cp server-config.example.yaml etc/nxpose/server-config.yaml
+
+      - name: Build and package for ${{ matrix.arch }} (${{ matrix.format }})
+        run: |
+          # Set version from git tag or use a default
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ "$VERSION" == "$GITHUB_REF" ]]; then
+            VERSION="1.0.0-dev.$(date +%Y%m%d%H%M%S)"
+          fi
           
-          # Create release body with links to packages
-          echo "# NXpose $VERSION" > release_body.md
-          echo "" >> release_body.md
-          echo "## Packages" >> release_body.md
-          echo "" >> release_body.md
-          echo "All packages are available at [Package Index](${INDEX_URL})" >> release_body.md
-          echo "" >> release_body.md
-          echo "### Direct Links" >> release_body.md
-          echo "" >> release_body.md
+          # Add version to the build
+          sed -i "s/VERSION := 1.0.0/VERSION := $VERSION/g" Makefile
+
+          # Build package
+          make ARCH=${{ matrix.arch }} PACKAGE_FORMAT=${{ matrix.format }}
           
-          for package in packages/*; do
-            filename=$(basename "$package")
-            echo "- [${filename}](https://${DO_SPACE_BUCKET}.${DO_SPACE_ENDPOINT}/${UPLOAD_PATH}/${filename})" >> release_body.md
-          done
+          # List created packages
+          ls -la nxpose*.${{ matrix.format }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-${{ matrix.arch }}-${{ matrix.format }}
+          path: nxpose*.${{ matrix.format }}
+          retention-days: 7
+
+  upload-to-minio:
+    name: Upload to MinIO S3
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' # Only upload on push to main or tags
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List packages
+        run: find dist -type f | sort
+
+      - name: Install MinIO client
+        run: |
+          curl -LO https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x mc
+          ./mc --version
+
+      - name: Configure MinIO client
+        env:
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+        run: |
+          ./mc alias set minio $MINIO_ENDPOINT $MINIO_ACCESS_KEY $MINIO_SECRET_KEY
+
+      - name: Upload packages to MinIO
+        run: |
+          # Set version from git tag or use a default
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ "$VERSION" == "$GITHUB_REF" ]]; then
+            VERSION="latest"
+          fi
           
-          # Create GitHub release
-          gh release create "v${VERSION}" --title "NXpose v${VERSION}" --notes-file release_body.md 
+          # Create bucket if it doesn't exist
+          ./mc mb --ignore-existing minio/nxpose-packages
+          
+          # Upload packages
+          find dist -type f -name "*.deb" -o -name "*.rpm" | while read -r pkg; do
+            filename=$(basename "$pkg")
+            # Upload to version-specific path
+            ./mc cp "$pkg" "minio/nxpose-packages/$VERSION/$filename"
+            # If this is a tag release, also copy to 'latest' path
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              ./mc cp "$pkg" "minio/nxpose-packages/latest/$filename"
+            fi
+            echo "Uploaded $filename to MinIO S3"
+          done 
