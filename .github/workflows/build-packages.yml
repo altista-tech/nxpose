@@ -16,6 +16,10 @@ jobs:
       matrix:
         arch: [amd64, arm64]
         format: [deb]
+    
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      s3_version: ${{ steps.set-version.outputs.s3_version }}
 
     steps:
       - name: Checkout code
@@ -65,19 +69,27 @@ jobs:
           # Fix any potential trailing whitespace in Makefile's .PHONY line
           perl -i -pe 's/\.PHONY:.+help\s+$/.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help/' Makefile
 
-      - name: Build and package for ${{ matrix.arch }}
+      - id: set-version
+        name: Set version info
         run: |
           # Set version from git tag or use a default
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
+            S3_VERSION=${GITHUB_REF#refs/tags/v}
           else
             # For non-tag builds, use timestamp-based version
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
             VERSION="1.0.0-dev.${TIMESTAMP}"
+            S3_VERSION="latest"
           fi
           
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "s3_version=$S3_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and package for ${{ matrix.arch }}
+        run: |
           # Set version in Makefile
-          sed -i "s/VERSION := 1.0.0/VERSION := ${VERSION}/" Makefile
+          sed -i "s/VERSION := 1.0.0/VERSION := ${{ steps.set-version.outputs.version }}/" Makefile
 
           # Build package
           make ARCH=${{ matrix.arch }} PACKAGE_FORMAT=deb
@@ -85,15 +97,42 @@ jobs:
           # List created packages
           ls -la nxpose*.deb
 
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxpose-${{ matrix.arch }}-deb
+          path: nxpose*.deb
+          retention-days: 1
+
+  upload-to-digitalocean:
+    name: Upload to DigitalOcean Spaces
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List packages
+        run: find dist -type f | sort
+
       - name: Install AWS CLI
-        if: github.event_name != 'pull_request'
         run: |
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
+          # Check if AWS CLI is already installed
+          if aws --version &> /dev/null; then
+            echo "AWS CLI is already installed:"
+            aws --version
+          else
+            # Install AWS CLI if not available
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+          fi
 
       - name: Configure AWS CLI for DigitalOcean Spaces
-        if: github.event_name != 'pull_request'
         env:
           DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
           DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
@@ -104,28 +143,23 @@ jobs:
           aws configure set default.region us-east-1
           # The us-east-1 region is used by default with DigitalOcean Spaces
 
-      - name: Upload package to DigitalOcean Spaces
-        if: github.event_name != 'pull_request'
+      - name: Upload packages to DigitalOcean Spaces
         env:
           DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
           DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
+          S3_VERSION: ${{ needs.build.outputs.s3_version }}
         run: |
-          # Set version from git tag or use a default for S3 path
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            S3_VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            S3_VERSION="latest"
-          fi
-          
-          # Upload the package using AWS CLI with DigitalOcean Spaces endpoint
-          for pkg in nxpose*.deb; do
-            if [ -f "$pkg" ]; then
-              # Upload to version-specific path
-              aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/$S3_VERSION/$pkg" --endpoint=https://${DO_SPACES_ENDPOINT}
-              # If this is a tag release, also copy to 'latest' path
-              if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-                aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/latest/$pkg" --endpoint=https://${DO_SPACES_ENDPOINT}
-              fi
-              echo "Uploaded $pkg to DigitalOcean Spaces"
+          # Upload all package files from artifacts
+          find dist -type f -name "*.deb" | while read -r pkg; do
+            filename=$(basename "$pkg")
+            
+            # Upload to version-specific path
+            aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/${S3_VERSION}/$filename" --endpoint=https://${DO_SPACES_ENDPOINT}
+            
+            # If this is a tag release, also copy to 'latest' path
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/latest/$filename" --endpoint=https://${DO_SPACES_ENDPOINT}
             fi
+            
+            echo "Uploaded $filename to DigitalOcean Spaces"
           done 
