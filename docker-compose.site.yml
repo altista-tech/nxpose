@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # Documentation site service
+  nxpose-site:
+    build:
+      context: .
+      dockerfile: Dockerfile.site
+    container_name: nxpose-site
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    labels:
+      - "description=NXpose documentation site"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Development server with live reload (optional)
+  # Requires mkdocs-material installed in a custom image
+  nxpose-site-dev:
+    image: squidfunk/mkdocs-material:latest
+    container_name: nxpose-site-dev
+    volumes:
+      - ./site:/docs
+      - ./README.md:/docs/docs/index.md:ro
+    ports:
+      - "8000:8000"
+    command: serve --dev-addr=0.0.0.0:8000
+    profiles:
+      - dev
+    restart: unless-stopped
+    labels:
+      - "description=NXpose documentation site (development mode with live reload)"

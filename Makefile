@@ -266,6 +266,20 @@ fmt:
 	@echo "Formatting code..."
 	$(GOFMT) -s -w .
 
+# Build documentation site
+site:
+	@echo "Building documentation site..."
+	@docker build -f Dockerfile.site --progress=plain -t nxpose-site .
+	@echo "Documentation site built successfully!"
+	@echo "To run the site locally:"
+	@echo "  docker run -d -p 8080:80 --name nxpose-site nxpose-site"
+	@echo "  Open http://localhost:8080 in your browser"
+
+# Serve documentation locally (requires mkdocs installed)
+site-serve:
+	@echo "Serving documentation locally..."
+	@cd site && mkdocs serve
+
 # Help
 help:
 	@echo "Available targets:"
@@ -280,6 +294,8 @@ help:
 	@echo "  clean-all  - Clean build directory for all architectures"
 	@echo "  test       - Run tests"
 	@echo "  fmt        - Format code"
+	@echo "  site       - Build documentation site using Docker"
+	@echo "  site-serve - Serve documentation locally (requires mkdocs)"
 	@echo "  help       - Show this help"
 	@echo ""
 	@echo "Architecture can be specified with ARCH=<arch>"
@@ -290,4 +306,4 @@ help:
 	@echo "  Example: make PACKAGE_FORMAT=deb"
 	@echo "  Supported formats on Linux: deb"
 
-.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt help
+.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt site site-serve help

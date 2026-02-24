@@ -1,0 +1,88 @@
+/* Custom styles for NXpose documentation */
+
+:root {
+  --md-primary-fg-color: #4F46E5;
+  --md-accent-fg-color: #818CF8;
+}
+
+/* Logo styling */
+.md-header__button.md-logo img {
+  height: 32px;
+  width: auto;
+}
+
+/* Code blocks */
+.md-typeset code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+}
+
+/* Admonitions */
+.md-typeset .admonition {
+  border-left: 0.2rem solid;
+  border-radius: 0.2rem;
+  box-shadow: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.05);
+}
+
+/* Tables */
+.md-typeset table:not([class]) {
+  border: 0.05rem solid rgba(0, 0, 0, 0.1);
+  border-radius: 0.2rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: rgba(0, 0, 0, 0.02);
+  font-weight: 700;
+}
+
+/* Links */
+.md-typeset a {
+  color: var(--md-primary-fg-color);
+}
+
+.md-typeset a:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* Homepage hero section */
+.hero {
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.hero p {
+  font-size: 1.25rem;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* Feature grid */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.feature {
+  padding: 1.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.feature:hover {
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+  transform: translateY(-0.2rem);
+}
+
+.feature h3 {
+  margin-top: 0;
+  color: var(--md-primary-fg-color);
+}

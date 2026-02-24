@@ -1,7 +1,15 @@
 .idea/
 .env
-CLAUDE.md
-vendor/
-.dlcatignore
 .vscode/
-.DS_store
+.DS_Store
+vendor/
+
+# Build artifacts
+client
+server
+
+# AI tools
+CLAUDE.md
+.claude/
+.ralphex/
+.dlcatignore

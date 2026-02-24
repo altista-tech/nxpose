@@ -1,0 +1,124 @@
+site_name: NXpose
+site_url: https://nxpose.io/
+site_author: NXpose Team
+site_description: >-
+  NXpose is a secure tunneling service written in Go that exposes local services
+  to the internet through encrypted tunnels. Perfect for webhook testing, sharing
+  local environments, and remote access to development services.
+
+repo_name: yourusername/nxpose
+repo_url: https://github.com/yourusername/nxpose
+copyright: Some rights reserved &copy; 2025 NXpose Team
+
+theme:
+  name: material
+  custom_dir: overrides
+  favicon: favicon.svg
+  language: en
+  palette:
+    - scheme: slate
+      media: "(prefers-color-scheme: dark)"
+      primary: indigo
+      accent: indigo
+    - scheme: default
+      media: "(prefers-color-scheme: light)"
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.follow
+    - toc.integrate
+    - content.code.annotate
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  logo: icon.png
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+extra:
+  generator: true
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourusername/nxpose
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/yourusername/nxpose/
+
+markdown_extensions:
+  - smarty
+  - sane_lists
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quick Start: quickstart.md
+  - Client Guide:
+      - Registration: client/registration.md
+      - Exposing Services: client/exposing-services.md
+      - TCP Tunnels: client/tcp-tunnels.md
+      - Configuration: client/configuration.md
+  - Server Guide:
+      - Setup: server/setup.md
+      - Configuration: server/configuration.md
+      - TLS Certificates: server/tls.md
+      - OAuth2 Setup: server/oauth2.md
+      - Database Setup: server/database.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Components: architecture/components.md
+      - Request Flow: architecture/request-flow.md
+      - Security Model: architecture/security.md
+  - Use Cases: use-cases.md
+  - Configuration Reference: config-reference.md
+  - Security: security.md
+  - Contributing: contributing.md
+  - FAQ: faq.md

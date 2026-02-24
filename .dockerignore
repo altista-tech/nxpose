@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts
+build/
+bin/
+dist/
+*.deb
+*.pkg
+*.rpm
+*.apk
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+*.test
+*.out
+coverage.txt
+
+# Documentation build (when building main app, not site)
+site/site/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp

@@ -1,0 +1,18 @@
+FROM --platform=$BUILDPLATFORM squidfunk/mkdocs-material:latest as build
+
+WORKDIR /build
+COPY site/ /build/
+COPY README.md /build/docs/index.md
+
+# Clean up any GitHub badges or content that doesn't render well
+RUN sed -i 's|https://github.com/yourusername/nxpose/workflows/CI/badge.svg||' /build/docs/index.md && \
+    sed -i 's|^.*workflows.*badge.*$||' /build/docs/index.md
+
+# Build the site
+RUN mkdocs build
+
+# Use a lightweight web server to serve the static site
+FROM nginx:alpine
+COPY --from=build /build/site /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
