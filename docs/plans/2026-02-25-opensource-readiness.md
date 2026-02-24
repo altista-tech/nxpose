@@ -33,12 +33,12 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 **Files:**
 - Create: `internal/config/config_test.go`
 
-- [ ] Test YAML config file loading (server and client configs)
-- [ ] Test environment variable overrides with NXPOSE_ prefix
-- [ ] Test default value population
-- [ ] Test invalid/missing config file handling
-- [ ] Test config validation (required fields, port ranges, URLs)
-- [ ] Run project test suite - must pass before task 3
+- [x] Test YAML config file loading (server and client configs)
+- [x] Test environment variable overrides with NXPOSE_ prefix
+- [x] Test default value population
+- [x] Test invalid/missing config file handling
+- [x] Test config validation (required fields, port ranges, URLs)
+- [x] Run project test suite - must pass before task 3
 
 ### Task 3: Unit Tests for internal/crypto Package
 
