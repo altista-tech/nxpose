@@ -124,13 +124,13 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 **Files:**
 - Create: `.github/workflows/test.yml`
 
-- [ ] Create test workflow: runs unit tests on push/PR with go test ./...
-- [ ] Add test coverage reporting with go tool cover
-- [ ] Add go vet and staticcheck linting steps
-- [ ] Add integration test job using Docker Compose services (MongoDB, Redis)
-- [ ] Add coverage badge generation
-- [ ] Run all workflows locally with act or verify YAML syntax
-- [ ] Run project test suite - must pass before task 9
+- [x] Create test workflow: runs unit tests on push/PR with go test ./...
+- [x] Add test coverage reporting with go tool cover
+- [x] Add go vet and staticcheck linting steps
+- [x] Add integration test job using Docker Compose services (MongoDB, Redis)
+- [x] Add coverage badge generation
+- [x] Run all workflows locally with act or verify YAML syntax
+- [x] Run project test suite - must pass before task 9
 
 ### Task 9: CI/CD for Cross-Platform Package Builds
 
