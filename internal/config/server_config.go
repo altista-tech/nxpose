@@ -43,6 +43,15 @@ type TunnelLimitsConfig struct {
 	MaxConnection string // Format: "10s", "5m", "2h", etc.
 }
 
+// AdminConfig holds configuration for the admin panel
+type AdminConfig struct {
+	Enabled    bool
+	PathPrefix string
+	AuthMethod string // "oauth", "basic", or "none"
+	Username   string // For basic auth
+	Password   string // For basic auth
+}
+
 // ServerConfig holds all configuration for the server
 type ServerConfig struct {
 	// Server settings
@@ -71,6 +80,9 @@ type ServerConfig struct {
 
 	// Let's Encrypt settings
 	LetsEncrypt LetsEncryptConfig
+
+	// Admin panel settings
+	Admin AdminConfig
 }
 
 // OAuth2Config holds the configuration for OAuth2 providers
@@ -149,6 +161,13 @@ func DefaultServerConfig() *ServerConfig {
 			DNSProvider:    "",
 			DNSCredentials: make(map[string]string),
 		},
+		Admin: AdminConfig{
+			Enabled:    false,
+			PathPrefix: "/admin",
+			AuthMethod: "basic",
+			Username:   "admin",
+			Password:   "",
+		},
 	}
 }
 
@@ -193,6 +212,13 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 	viper.BindEnv("letsencrypt.environment", "NXPOSE_LETSENCRYPT_ENVIRONMENT")
 	viper.BindEnv("letsencrypt.storage_dir", "NXPOSE_LETSENCRYPT_STORAGE_DIR")
 	viper.BindEnv("letsencrypt.dns.provider", "NXPOSE_LETSENCRYPT_DNS_PROVIDER")
+
+	// Admin panel settings
+	viper.BindEnv("admin.enabled", "NXPOSE_ADMIN_ENABLED")
+	viper.BindEnv("admin.path_prefix", "NXPOSE_ADMIN_PATH_PREFIX")
+	viper.BindEnv("admin.auth_method", "NXPOSE_ADMIN_AUTH_METHOD")
+	viper.BindEnv("admin.username", "NXPOSE_ADMIN_USERNAME")
+	viper.BindEnv("admin.password", "NXPOSE_ADMIN_PASSWORD")
 
 	// OAuth2 settings
 	viper.BindEnv("oauth2.enabled", "NXPOSE_OAUTH2_ENABLED")
@@ -418,6 +444,23 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 	if viper.IsSet("letsencrypt.dns.credentials") {
 		credentials := viper.GetStringMapString("letsencrypt.dns.credentials")
 		config.LetsEncrypt.DNSCredentials = credentials
+	}
+
+	// Admin panel settings
+	if viper.IsSet("admin.enabled") {
+		config.Admin.Enabled = viper.GetBool("admin.enabled")
+	}
+	if viper.IsSet("admin.path_prefix") {
+		config.Admin.PathPrefix = viper.GetString("admin.path_prefix")
+	}
+	if viper.IsSet("admin.auth_method") {
+		config.Admin.AuthMethod = viper.GetString("admin.auth_method")
+	}
+	if viper.IsSet("admin.username") {
+		config.Admin.Username = viper.GetString("admin.username")
+	}
+	if viper.IsSet("admin.password") {
+		config.Admin.Password = viper.GetString("admin.password")
 	}
 
 	return config, nil

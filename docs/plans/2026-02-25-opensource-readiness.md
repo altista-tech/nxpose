@@ -158,19 +158,19 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Modify: `internal/server/server.go` (mount admin routes)
 - Modify: `internal/config/config.go` (admin panel config fields)
 
-- [ ] Design admin panel pages: dashboard (active tunnels, connections, bandwidth), tunnel list with controls (kill/inspect), server settings view, client list
-- [ ] Create admin Go handler package with HTMX-compatible endpoints returning HTML fragments
-- [ ] Build base layout template with shadcn/ui-styled components (sidebar nav, cards, tables, badges)
-- [ ] Implement dashboard page: live tunnel count, active connections, bytes transferred, uptime
-- [ ] Implement tunnel management page: list tunnels, kill tunnel, view tunnel details
-- [ ] Implement client list page: connected clients, their tunnels, last active time
-- [ ] Implement server settings page: view current config, toggle maintenance mode
-- [ ] Add admin authentication (reuse existing session/OAuth or add basic auth option)
-- [ ] Add real-time updates via HTMX polling or SSE for dashboard stats
-- [ ] Mount admin routes on configurable path (default /admin) in server.go
-- [ ] Add admin panel config fields (enabled, path prefix, auth method) to server config
-- [ ] Write unit tests for admin handler endpoints
-- [ ] Run project test suite - must pass before task 11
+- [x] Design admin panel pages: dashboard (active tunnels, connections, bandwidth), tunnel list with controls (kill/inspect), server settings view, client list
+- [x] Create admin Go handler package with HTMX-compatible endpoints returning HTML fragments
+- [x] Build base layout template with shadcn/ui-styled components (sidebar nav, cards, tables, badges)
+- [x] Implement dashboard page: live tunnel count, active connections, bytes transferred, uptime
+- [x] Implement tunnel management page: list tunnels, kill tunnel, view tunnel details
+- [x] Implement client list page: connected clients, their tunnels, last active time
+- [x] Implement server settings page: view current config, toggle maintenance mode
+- [x] Add admin authentication (reuse existing session/OAuth or add basic auth option)
+- [x] Add real-time updates via HTMX polling or SSE for dashboard stats
+- [x] Mount admin routes on configurable path (default /admin) in server.go
+- [x] Add admin panel config fields (enabled, path prefix, auth method) to server config
+- [x] Write unit tests for admin handler endpoints
+- [x] Run project test suite - must pass before task 11
 
 ### Task 11: Enhance MkDocs Site with Product Landing Page
 

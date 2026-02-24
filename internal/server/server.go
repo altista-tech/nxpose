@@ -20,6 +20,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/net/websocket"
 
+	"nxpose/internal/admin"
 	"nxpose/internal/config"
 	"nxpose/internal/logger"
 
@@ -68,6 +69,7 @@ type Server struct {
 	mu         sync.Mutex
 	stopping   bool
 	shutdownCh chan struct{}
+	startTime  time.Time
 }
 
 // NewServer creates a new server instance
@@ -161,6 +163,7 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 		mongo:        mongo,
 		redis:        redis,
 		shutdownCh:   make(chan struct{}),
+		startTime:    time.Now(),
 	}
 
 	// Create the auth service if OAuth2 is enabled
@@ -896,6 +899,18 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/api/tunnel", s.handleTunnel)
 	s.router.HandleFunc("/api/ws", s.handleWebSocket)
 	s.router.HandleFunc("/api/status", s.handleStatus)
+
+	// Mount admin panel if enabled
+	if s.config.Admin.Enabled {
+		adminHandler, err := admin.NewHandler(&s.config.Admin, s.config, s)
+		if err != nil {
+			s.log.WithError(err).Error("Failed to initialize admin panel")
+		} else {
+			adminHandler.RegisterRoutes(s.router)
+			s.log.Infof("Admin panel enabled at %s", s.config.Admin.PathPrefix)
+		}
+	}
+
 	s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
 }
 
