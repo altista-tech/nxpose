@@ -6,8 +6,8 @@ site_description: >-
   to the internet through encrypted tunnels. Perfect for webhook testing, sharing
   local environments, and remote access to development services.
 
-repo_name: yourusername/nxpose
-repo_url: https://github.com/yourusername/nxpose
+repo_name: nxrvl/nxpose
+repo_url: https://github.com/nxrvl/nxpose
 copyright: Some rights reserved &copy; 2025 NXpose Team
 
 theme:
@@ -20,10 +20,16 @@ theme:
       media: "(prefers-color-scheme: dark)"
       primary: indigo
       accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
     - scheme: default
       media: "(prefers-color-scheme: light)"
       primary: indigo
       accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
   features:
     - navigation.instant
     - navigation.tracking
@@ -46,14 +52,17 @@ plugins:
   - search
   - minify:
       minify_html: true
+  - social
 
 extra:
   generator: true
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yourusername/nxpose
+      link: https://github.com/nxrvl/nxpose
+      name: NXpose on GitHub
     - icon: fontawesome/brands/docker
-      link: https://hub.docker.com/r/yourusername/nxpose/
+      link: https://hub.docker.com/r/nxrvl/nxpose/
+      name: NXpose on Docker Hub
 
 markdown_extensions:
   - smarty
@@ -112,6 +121,9 @@ nav:
       - TLS Certificates: server/tls.md
       - OAuth2 Setup: server/oauth2.md
       - Database Setup: server/database.md
+      - Self-Hosting: self-hosting.md
+  - Admin Panel: admin-panel.md
+  - API Reference: api-reference.md
   - Architecture:
       - Overview: architecture/overview.md
       - Components: architecture/components.md

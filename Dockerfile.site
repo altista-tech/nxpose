@@ -2,11 +2,9 @@ FROM --platform=$BUILDPLATFORM squidfunk/mkdocs-material:latest as build
 
 WORKDIR /build
 COPY site/ /build/
-COPY README.md /build/docs/index.md
 
-# Clean up any GitHub badges or content that doesn't render well
-RUN sed -i 's|https://github.com/yourusername/nxpose/workflows/CI/badge.svg||' /build/docs/index.md && \
-    sed -i 's|^.*workflows.*badge.*$||' /build/docs/index.md
+# Install social plugin dependencies
+RUN pip install pillow cairosvg
 
 # Build the site
 RUN mkdocs build

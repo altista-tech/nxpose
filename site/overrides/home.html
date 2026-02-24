@@ -1,0 +1,148 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+  {{ super() }}
+{% endblock %}
+
+{% block content %}
+<div class="nx-hero">
+  <div class="nx-hero__inner">
+    <h1 class="nx-hero__title">Secure Tunneling,<br><span class="nx-hero__accent">Your Infrastructure</span></h1>
+    <p class="nx-hero__tagline">
+      Expose local services to the internet through encrypted tunnels.
+      Self-hosted, open source, and built with Go.
+    </p>
+    <div class="nx-hero__actions">
+      <a href="quickstart/" class="md-button md-button--primary nx-btn nx-btn--primary">
+        Get Started
+      </a>
+      <a href="https://github.com/nxrvl/nxpose" class="md-button nx-btn nx-btn--secondary">
+        View on GitHub
+      </a>
+    </div>
+    <div class="nx-hero__install">
+      <code>go install github.com/nxrvl/nxpose/cmd/client@latest</code>
+    </div>
+  </div>
+</div>
+
+<div class="nx-features">
+  <div class="nx-features__grid">
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x1F510;</span>
+      </div>
+      <h3 class="nx-feature__title">End-to-End Encryption</h3>
+      <p class="nx-feature__desc">
+        TLS everywhere with Let's Encrypt integration, mutual TLS client certificates,
+        and automatic certificate management.
+      </p>
+    </div>
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x1F310;</span>
+      </div>
+      <h3 class="nx-feature__title">HTTP &amp; TCP Tunnels</h3>
+      <p class="nx-feature__desc">
+        Expose web servers with automatic subdomain routing, or forward raw TCP
+        connections for databases, SSH, and more.
+      </p>
+    </div>
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x1F512;</span>
+      </div>
+      <h3 class="nx-feature__title">OAuth2 Authentication</h3>
+      <p class="nx-feature__desc">
+        Authenticate clients through GitHub or Google. Session management
+        backed by MongoDB or Redis.
+      </p>
+    </div>
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x1F3E0;</span>
+      </div>
+      <h3 class="nx-feature__title">Self-Hosted</h3>
+      <p class="nx-feature__desc">
+        Run on your own infrastructure. Deploy with Docker, DEB, RPM, or macOS packages.
+        Full control over your data.
+      </p>
+    </div>
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x1F4CA;</span>
+      </div>
+      <h3 class="nx-feature__title">Admin Dashboard</h3>
+      <p class="nx-feature__desc">
+        Built-in admin panel with live tunnel monitoring, client management,
+        and server configuration. Powered by HTMX.
+      </p>
+    </div>
+    <div class="nx-feature">
+      <div class="nx-feature__icon">
+        <span class="twemoji">&#x26A1;</span>
+      </div>
+      <h3 class="nx-feature__title">Built with Go</h3>
+      <p class="nx-feature__desc">
+        Single binary deployment, low memory footprint, and high concurrency.
+        Cross-compiled for Linux, macOS, and Windows.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="nx-quickstart">
+  <h2 class="nx-quickstart__title">Get Up and Running in Minutes</h2>
+  <div class="nx-quickstart__steps">
+    <div class="nx-quickstart__step">
+      <div class="nx-quickstart__number">1</div>
+      <h3>Install the Client</h3>
+      <div class="highlight">
+        <pre><code class="language-bash">go install github.com/nxrvl/nxpose/cmd/client@latest</code></pre>
+      </div>
+    </div>
+    <div class="nx-quickstart__step">
+      <div class="nx-quickstart__number">2</div>
+      <h3>Register with a Server</h3>
+      <div class="highlight">
+        <pre><code class="language-bash">nxpose register --server your-server.com:8443</code></pre>
+      </div>
+    </div>
+    <div class="nx-quickstart__step">
+      <div class="nx-quickstart__number">3</div>
+      <h3>Expose Your Service</h3>
+      <div class="highlight">
+        <pre><code class="language-bash">nxpose expose http 8080
+# Your service is now available at https://abc123.your-server.com</code></pre>
+      </div>
+    </div>
+  </div>
+  <div class="nx-quickstart__cta">
+    <a href="quickstart/" class="md-button md-button--primary nx-btn nx-btn--primary">
+      Read the Full Guide
+    </a>
+  </div>
+</div>
+
+<div class="nx-usecases">
+  <h2 class="nx-usecases__title">Use Cases</h2>
+  <div class="nx-usecases__grid">
+    <div class="nx-usecase">
+      <h3>Webhook Development</h3>
+      <p>Receive GitHub, Stripe, or Slack webhooks directly on your local machine during development.</p>
+    </div>
+    <div class="nx-usecase">
+      <h3>Remote Access</h3>
+      <p>Expose SSH, databases, or internal APIs to remote team members through secure tunnels.</p>
+    </div>
+    <div class="nx-usecase">
+      <h3>Demo &amp; Preview</h3>
+      <p>Share your work-in-progress with clients and stakeholders without deploying to staging.</p>
+    </div>
+    <div class="nx-usecase">
+      <h3>IoT &amp; Edge</h3>
+      <p>Connect devices behind NAT or firewalls to your cloud infrastructure securely.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

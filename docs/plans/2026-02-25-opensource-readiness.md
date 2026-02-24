@@ -183,17 +183,17 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Create: `site/docs/api-reference.md`
 - Create: `site/docs/admin-panel.md`
 
-- [ ] Create custom home page template with hero section, feature cards, and CTA
-- [ ] Add product-style CSS (gradient hero, feature grid, responsive layout)
-- [ ] Add self-hosting guide (Docker Compose deployment, bare metal, configuration)
-- [ ] Add API reference documentation for server endpoints
-- [ ] Add admin panel documentation (setup, features, screenshots)
-- [ ] Add "Getting Started" prominent quick-start section on landing page
-- [ ] Configure MkDocs navigation to use custom home + existing docs structure
-- [ ] Add social cards and OpenGraph metadata for link previews
-- [ ] Test site builds correctly with `make site` and docker-compose
-- [ ] Verify responsive design on mobile/tablet/desktop viewports
-- [ ] Run project test suite - must pass before task 12
+- [x] Create custom home page template with hero section, feature cards, and CTA
+- [x] Add product-style CSS (gradient hero, feature grid, responsive layout)
+- [x] Add self-hosting guide (Docker Compose deployment, bare metal, configuration)
+- [x] Add API reference documentation for server endpoints
+- [x] Add admin panel documentation (setup, features, screenshots)
+- [x] Add "Getting Started" prominent quick-start section on landing page
+- [x] Configure MkDocs navigation to use custom home + existing docs structure
+- [x] Add social cards and OpenGraph metadata for link previews
+- [x] Test site builds correctly with `make site` and docker-compose
+- [x] Verify responsive design on mobile/tablet/desktop viewports
+- [x] Run project test suite - must pass before task 12
 
 ### Task 12: Verify Acceptance Criteria
 
