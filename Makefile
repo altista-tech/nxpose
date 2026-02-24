@@ -1,6 +1,7 @@
 # Makefile for nxpose
 # Builds the nxpose server and creates packages for macOS and Linux (ARM and AMD64)
-# Supports multiple package formats: .deb for Linux and .pkg for macOS
+# Supports multiple package formats: .deb and .rpm for Linux, .pkg for macOS
+# Also builds cross-platform client binaries
 
 # Variables
 NAME := nxpose
@@ -10,6 +11,10 @@ GOFMT := gofmt
 GOBUILD := $(GO) build
 GOTEST := $(GO) test
 BINARY_NAME := nxpose-server
+CLIENT_BINARY_NAME := nxpose
+
+# Client binary output directory
+DIST_DIR := dist
 
 # Detect operating system and architecture
 OS := $(shell uname -s)
@@ -32,7 +37,7 @@ else ifeq ($(ARCH),aarch64)
 endif
 
 # Linux package formats
-LINUX_PACKAGE_FORMATS := deb
+LINUX_PACKAGE_FORMATS := deb rpm
 
 # OS-specific settings
 ifeq ($(OS),Darwin)
@@ -44,9 +49,11 @@ ifeq ($(OS),Darwin)
 else
   # Linux settings
   PACKAGE_FORMAT ?= deb
-  # Fix the naming convention for deb packages
+  # Fix the naming convention for packages
   ifeq ($(PACKAGE_FORMAT),deb)
     PACKAGE_NAME := $(NAME)_$(VERSION)_$(ARCH).$(PACKAGE_FORMAT)
+  else ifeq ($(PACKAGE_FORMAT),rpm)
+    PACKAGE_NAME := $(NAME)-$(VERSION)-1.$(ARCH).rpm
   endif
 endif
 
@@ -72,6 +79,14 @@ else
   DEBIAN_POSTINST := $(DEBIAN_DIR)/postinst
   DEBIAN_PRERM := $(DEBIAN_DIR)/prerm
   SYSTEMD_SERVICE := $(SYSTEMD_DIR)/$(NAME).service
+
+  # RPM build directories
+  RPM_BUILD_ROOT := build/rpmbuild
+  RPM_SOURCES := $(RPM_BUILD_ROOT)/SOURCES
+  RPM_SPECS := $(RPM_BUILD_ROOT)/SPECS
+  RPM_RPMS := $(RPM_BUILD_ROOT)/RPMS
+  RPM_BUILD := $(RPM_BUILD_ROOT)/BUILD
+  RPM_SRPMS := $(RPM_BUILD_ROOT)/SRPMS
 endif
 
 # Default target
@@ -148,8 +163,8 @@ else
 	@cp $(BIN_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/
 	@cp server-config.example.yaml $(CONFIG_DIR)/server-config.yaml
 	@cp nxpose.service $(SYSTEMD_SERVICE)
-	
-	# Format-specific preparation
+  ifeq ($(PACKAGE_FORMAT),deb)
+	# DEB-specific preparation
 	@mkdir -p $(DEBIAN_DIR)
 	@echo "Package: $(NAME)" > $(DEBIAN_CONTROL)
 	@echo "Version: $(VERSION)" >> $(DEBIAN_CONTROL)
@@ -185,6 +200,64 @@ else
 	@echo "systemctl disable $(NAME).service || true" >> $(DEBIAN_PRERM)
 	@echo "exit 0" >> $(DEBIAN_PRERM)
 	@chmod 755 $(DEBIAN_PRERM)
+  else ifeq ($(PACKAGE_FORMAT),rpm)
+	# RPM-specific preparation: generate spec file and source tarball
+	@mkdir -p $(RPM_SOURCES) $(RPM_SPECS) $(RPM_BUILD) $(RPM_RPMS) $(RPM_SRPMS)
+	@# Create source tarball with the built binary and config files
+	@mkdir -p $(RPM_BUILD)/$(NAME)-$(VERSION)/opt/$(NAME)
+	@mkdir -p $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/$(NAME)
+	@mkdir -p $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/systemd/system
+	@mkdir -p $(RPM_BUILD)/$(NAME)-$(VERSION)/var/log/$(NAME)
+	@cp $(BIN_DIR)/$(BINARY_NAME) $(RPM_BUILD)/$(NAME)-$(VERSION)/opt/$(NAME)/
+	@cp server-config.example.yaml $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/$(NAME)/server-config.yaml
+	@cp nxpose.service $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/systemd/system/$(NAME).service
+	@cd $(RPM_BUILD) && tar czf ../SOURCES/$(NAME)-$(VERSION).tar.gz $(NAME)-$(VERSION)
+	@# Generate RPM spec file
+	@echo "Name: $(NAME)" > $(RPM_SPECS)/$(NAME).spec
+	@echo "Version: $(VERSION)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "Release: 1" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "Summary: nxpose tunneling server" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "License: MIT" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "Source0: $(NAME)-$(VERSION).tar.gz" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "BuildArch: $(if $(filter amd64,$(ARCH)),x86_64,aarch64)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%description" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "A secure tunneling service to expose local services to the internet." >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%prep" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%setup -q" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%install" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "mkdir -p %{buildroot}/opt/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "mkdir -p %{buildroot}/etc/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "mkdir -p %{buildroot}/etc/systemd/system" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "mkdir -p %{buildroot}/var/log/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "cp -r opt/$(NAME)/* %{buildroot}/opt/$(NAME)/" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "cp -r etc/$(NAME)/* %{buildroot}/etc/$(NAME)/" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "cp etc/systemd/system/$(NAME).service %{buildroot}/etc/systemd/system/" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%files" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "/opt/$(NAME)/$(BINARY_NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%config(noreplace) /etc/$(NAME)/server-config.yaml" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "/etc/systemd/system/$(NAME).service" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%dir /var/log/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%pre" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "getent group $(NAME) >/dev/null || groupadd --system $(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "getent passwd $(NAME) >/dev/null || useradd --system --gid $(NAME) --shell /sbin/nologin --home-dir /opt/$(NAME) $(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%post" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "chown -R $(NAME):$(NAME) /opt/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "chown -R $(NAME):$(NAME) /etc/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "chown -R $(NAME):$(NAME) /var/log/$(NAME)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "systemctl daemon-reload" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "systemctl enable $(NAME).service" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "systemctl start $(NAME).service || true" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%preun" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "systemctl stop $(NAME).service || true" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "systemctl disable $(NAME).service || true" >> $(RPM_SPECS)/$(NAME).spec
+  endif
 endif
 
 # Create the package
@@ -199,6 +272,7 @@ ifeq ($(OS),Darwin)
 		$(PACKAGE_NAME)
 else
 	@echo "Creating Linux $(PACKAGE_FORMAT) package for $(ARCH)..."
+  ifeq ($(PACKAGE_FORMAT),deb)
 	# Ensure proper Debian package file permissions
 	@chmod 755 $(DEBIAN_DIR)
 	@chmod 644 $(DEBIAN_CONTROL)
@@ -207,18 +281,27 @@ else
 	@find $(BUILD_DIR)/etc -type f -exec chmod 644 {} \;
 	@chmod 644 $(SYSTEMD_SERVICE)
 	@chmod 755 $(DEBIAN_POSTINST) $(DEBIAN_PRERM)
-	
+
 	# Calculate the installed size in KB
 	@du -sk --exclude=DEBIAN $(BUILD_DIR) > $(BUILD_DIR)/.size.tmp
 	@echo "Installed-Size: $$(cat $(BUILD_DIR)/.size.tmp | cut -f1)" >> $(DEBIAN_CONTROL)
 	@rm -f $(BUILD_DIR)/.size.tmp
-	
+
 	# Create debian-binary file (required for .deb format)
 	@echo "2.0" > $(BUILD_DIR)/debian-binary
-	
+
 	# Use dpkg-deb with proper settings
 	@dpkg-deb --build --root-owner-group $(BUILD_DIR) ./$(PACKAGE_NAME)
 	@echo "Created package: $(PACKAGE_NAME)"
+  else ifeq ($(PACKAGE_FORMAT),rpm)
+	# Build RPM package using rpmbuild
+	@rpmbuild --define "_topdir $(CURDIR)/$(RPM_BUILD_ROOT)" \
+		--define "_target_cpu $(if $(filter amd64,$(ARCH)),x86_64,aarch64)" \
+		-bb $(RPM_SPECS)/$(NAME).spec
+	@# Copy the built RPM to the project root
+	@find $(RPM_RPMS) -name "*.rpm" -exec cp {} ./$(PACKAGE_NAME) \;
+	@echo "Created package: $(PACKAGE_NAME)"
+  endif
 endif
 
 # Install the package
@@ -248,13 +331,13 @@ endif
 clean:
 	@echo "Cleaning build directory for $(ARCH)..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb
+	@rm -f $(NAME)*$(ARCH).pkg $(NAME)*$(ARCH).deb $(NAME)*$(ARCH).rpm
 
 # Clean all build directories
 clean-all:
 	@echo "Cleaning all build directories..."
-	@rm -rf build
-	@rm -f $(NAME)*.pkg $(NAME)*.deb
+	@rm -rf build $(DIST_DIR)
+	@rm -f $(NAME)*.pkg $(NAME)*.deb $(NAME)*.rpm
 
 # Test (unit tests only, excludes integration tests)
 test:
@@ -272,6 +355,25 @@ test-all:
 	$(GOTEST) -v ./...
 	@echo "Running integration tests..."
 	$(GOTEST) -v -tags=integration -timeout=300s ./internal/integration/...
+
+# Build client binary for a specific platform
+# Usage: make build-client GOOS=linux GOARCH=amd64
+build-client:
+	@echo "Building $(CLIENT_BINARY_NAME) for $(CLIENT_GOOS)/$(CLIENT_GOARCH)..."
+	@mkdir -p $(DIST_DIR)
+	GOOS=$(CLIENT_GOOS) GOARCH=$(CLIENT_GOARCH) $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-$(CLIENT_GOOS)-$(CLIENT_GOARCH)$(CLIENT_EXT) ./cmd/client
+
+# Build client binaries for all supported platforms
+build-clients:
+	@echo "Building client binaries for all platforms..."
+	@mkdir -p $(DIST_DIR)
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-linux-amd64 ./cmd/client
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-linux-arm64 ./cmd/client
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-darwin-amd64 ./cmd/client
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-darwin-arm64 ./cmd/client
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(DIST_DIR)/$(CLIENT_BINARY_NAME)-windows-amd64.exe ./cmd/client
+	@echo "Client binaries built in $(DIST_DIR)/"
+	@ls -la $(DIST_DIR)/
 
 # Format code
 fmt:
@@ -295,22 +397,24 @@ site-serve:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all        - Clean, build and package for current architecture ($(ARCH))"
-	@echo "  all-arch   - Build and package for all architectures (amd64, arm64)"
-	@echo "  build      - Build the binary for current architecture"
+	@echo "  all            - Clean, build and package for current architecture ($(ARCH))"
+	@echo "  all-arch       - Build and package for all architectures (amd64, arm64)"
+	@echo "  build          - Build the server binary for current architecture"
+	@echo "  build-client   - Build client binary for a specific platform (set CLIENT_GOOS, CLIENT_GOARCH)"
+	@echo "  build-clients  - Build client binaries for all platforms"
 	@echo "  prepare-package - Prepare the package structure"
-	@echo "  package    - Create the package"
-	@echo "  install    - Install the package"
-	@echo "  uninstall  - Uninstall the package"
-	@echo "  clean      - Clean build directory for current architecture"
-	@echo "  clean-all  - Clean build directory for all architectures"
-	@echo "  test             - Run unit tests"
+	@echo "  package        - Create the package"
+	@echo "  install        - Install the package"
+	@echo "  uninstall      - Uninstall the package"
+	@echo "  clean          - Clean build directory for current architecture"
+	@echo "  clean-all      - Clean build directory for all architectures"
+	@echo "  test           - Run unit tests"
 	@echo "  test-integration - Run integration tests (requires Docker)"
-	@echo "  test-all         - Run all tests (unit + integration)"
-	@echo "  fmt        - Format code"
-	@echo "  site       - Build documentation site using Docker"
-	@echo "  site-serve - Serve documentation locally (requires mkdocs)"
-	@echo "  help       - Show this help"
+	@echo "  test-all       - Run all tests (unit + integration)"
+	@echo "  fmt            - Format code"
+	@echo "  site           - Build documentation site using Docker"
+	@echo "  site-serve     - Serve documentation locally (requires mkdocs)"
+	@echo "  help           - Show this help"
 	@echo ""
 	@echo "Architecture can be specified with ARCH=<arch>"
 	@echo "  Example: make ARCH=arm64"
@@ -318,6 +422,6 @@ help:
 	@echo ""
 	@echo "Package format can be specified with PACKAGE_FORMAT=<format>"
 	@echo "  Example: make PACKAGE_FORMAT=deb"
-	@echo "  Supported formats on Linux: deb"
+	@echo "  Supported formats on Linux: deb, rpm"
 
-.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test test-integration test-all fmt site site-serve help
+.PHONY: all all-arch build build-client build-clients prepare-package package install uninstall clean clean-all test test-integration test-all fmt site site-serve help

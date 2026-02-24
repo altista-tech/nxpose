@@ -138,15 +138,15 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Modify: `Makefile` (add RPM support, client binary targets)
 - Modify: `.github/workflows/build-packages.yml`
 
-- [ ] Add RPM package format support in Makefile (spec file generation, rpmbuild)
-- [ ] Add client binary build target in Makefile (cross-compile for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64)
-- [ ] Expand CI build matrix to include RPM format alongside DEB
-- [ ] Add macOS PKG build job in CI (using macos-latest runner)
-- [ ] Add client binary build job that produces standalone binaries for all platforms
-- [ ] Add GitHub Release creation on tag push with all artifacts (DEB, RPM, PKG, client binaries)
-- [ ] Gate build-packages workflow on test workflow passing
-- [ ] Test that RPM installs server as a systemd service (same as DEB)
-- [ ] Run project test suite - must pass before task 10
+- [x] Add RPM package format support in Makefile (spec file generation, rpmbuild)
+- [x] Add client binary build target in Makefile (cross-compile for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64)
+- [x] Expand CI build matrix to include RPM format alongside DEB
+- [x] Add macOS PKG build job in CI (using macos-latest runner)
+- [x] Add client binary build job that produces standalone binaries for all platforms
+- [x] Add GitHub Release creation on tag push with all artifacts (DEB, RPM, PKG, client binaries)
+- [x] Gate build-packages workflow on test workflow passing
+- [x] Test that RPM installs server as a systemd service (same as DEB)
+- [x] Run project test suite - must pass before task 10
 
 ### Task 10: Admin Panel for Self-Hosting
 
