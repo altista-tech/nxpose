@@ -49,13 +49,13 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Create: `internal/crypto/certificate_manager_test.go`
 - Create: `internal/crypto/dns_test.go`
 
-- [ ] Test self-signed certificate generation (valid cert, key pair, expiry)
-- [ ] Test TLS configuration creation (min version, cipher suites)
-- [ ] Test certificate file loading (valid, missing, invalid files)
-- [ ] Test OAuth2 config construction for GitHub and Google providers
-- [ ] Test OAuth2 state parameter generation and validation
-- [ ] Test DNS provider configuration parsing
-- [ ] Run project test suite - must pass before task 4
+- [x] Test self-signed certificate generation (valid cert, key pair, expiry)
+- [x] Test TLS configuration creation (min version, cipher suites)
+- [x] Test certificate file loading (valid, missing, invalid files)
+- [x] Test OAuth2 config construction for GitHub and Google providers
+- [x] Test OAuth2 state parameter generation and validation
+- [x] Test DNS provider configuration parsing
+- [x] Run project test suite - must pass before task 4
 
 ### Task 4: Unit Tests for internal/protocol Package
 
