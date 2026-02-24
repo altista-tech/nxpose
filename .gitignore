@@ -5,8 +5,8 @@
 vendor/
 
 # Build artifacts
-client
-server
+/client
+/server
 
 # AI tools
 CLAUDE.md

@@ -89,14 +89,14 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Create: `internal/server/handler_test.go`
 - Create: `internal/server/websocket_test.go`
 
-- [ ] Add tests for all HTTP handler endpoints (health, status, tunnel CRUD)
-- [ ] Test subdomain routing and wildcard matching
-- [ ] Test tunnel limit enforcement (per-user and per-client)
-- [ ] Test session management (create, validate, expire)
-- [ ] Test WebSocket upgrade and tunnel data flow with mock connections
-- [ ] Test OAuth2 callback handling with mock provider responses
-- [ ] Test MongoDB and Redis store interfaces with mock implementations
-- [ ] Run project test suite - must pass before task 7
+- [x] Add tests for all HTTP handler endpoints (health, status, tunnel CRUD)
+- [x] Test subdomain routing and wildcard matching
+- [x] Test tunnel limit enforcement (per-user and per-client)
+- [x] Test session management (create, validate, expire)
+- [x] Test WebSocket upgrade and tunnel data flow with mock connections
+- [x] Test OAuth2 callback handling with mock provider responses
+- [x] Test MongoDB and Redis store interfaces with mock implementations
+- [x] Run project test suite - must pass before task 7
 
 ### Task 7: Dev Container and Integration Test Infrastructure
 
