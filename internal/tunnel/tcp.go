@@ -110,9 +110,15 @@ func (t *TCPTunnel) Stop() error {
 	// Close stop channel
 	close(t.stopCh)
 
-	// Close all connections
+	// Close all connections inline to avoid deadlock (we already hold t.mu)
 	for id, conn := range t.connections {
-		t.closeConnection(id, conn)
+		conn.mu.Lock()
+		if !conn.closed {
+			conn.closed = true
+			conn.LocalConn.Close()
+		}
+		conn.mu.Unlock()
+		delete(t.connections, id)
 	}
 
 	t.log.Info("TCP tunnel stopped")

@@ -74,13 +74,13 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Create: `internal/tunnel/tunnel_test.go`
 - Create: `internal/tunnel/tcp_tunnel_test.go`
 
-- [ ] Test tunnel manager creation and configuration
-- [ ] Test tunnel registration and lookup
-- [ ] Test tunnel expiration and cleanup logic
-- [ ] Test TCP tunnel connection handling
-- [ ] Test reconnection logic and backoff
-- [ ] Test concurrent tunnel operations (race conditions)
-- [ ] Run project test suite - must pass before task 6
+- [x] Test tunnel manager creation and configuration
+- [x] Test tunnel registration and lookup
+- [x] Test tunnel expiration and cleanup logic
+- [x] Test TCP tunnel connection handling
+- [x] Test reconnection logic and backoff
+- [x] Test concurrent tunnel operations (race conditions)
+- [x] Run project test suite - must pass before task 6
 
 ### Task 6: Expand Server Unit Tests
 

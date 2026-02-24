@@ -461,8 +461,10 @@ func (tm *TunnelManager) startTunnel(mt *ManagedTunnel) {
 		log:        tm.log,
 	}
 
-	// Store tunnel in managed tunnel
+	// Store tunnel in managed tunnel (protected by lock to avoid race with Close)
+	tm.mu.Lock()
 	mt.tunnel = tunnel
+	tm.mu.Unlock()
 
 	// Start tunnel with the server-provided ID
 	if err := tunnel.Start(); err != nil {
@@ -841,8 +843,11 @@ func (tm *TunnelManager) Close() error {
 	for id, tunnel := range tunnelsCopy {
 		tm.log.Infof("Stopping tunnel %s", id)
 		close(tunnel.stopChan)
-		if tunnel.tunnel != nil {
-			tunnel.tunnel.Stop()
+		tm.mu.RLock()
+		t := tunnel.tunnel
+		tm.mu.RUnlock()
+		if t != nil {
+			t.Stop()
 		}
 	}
 
