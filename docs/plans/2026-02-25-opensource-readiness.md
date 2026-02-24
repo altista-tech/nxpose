@@ -19,22 +19,14 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 ### Task 1: Add Missing Open-Source Community Files
 
 **Files:**
-- Create: `LICENSE`
-- Create: `CONTRIBUTING.md`
-- Create: `CODE_OF_CONDUCT.md`
-- Create: `SECURITY.md`
-- Modify: `README.md` (fix broken references, add badges)
+- Create: `README.md` 
 - Create: `.github/ISSUE_TEMPLATE/bug_report.md`
 - Create: `.github/ISSUE_TEMPLATE/feature_request.md`
 - Create: `.github/PULL_REQUEST_TEMPLATE.md`
 
-- [ ] Create MIT LICENSE file (already referenced in README)
-- [ ] Create CONTRIBUTING.md with development setup, PR workflow, code style guide
-- [ ] Create CODE_OF_CONDUCT.md (Contributor Covenant v2.1)
-- [ ] Create SECURITY.md with vulnerability reporting process
-- [ ] Add GitHub issue and PR templates
-- [ ] Update README.md to fix broken contributing/license links and add CI badge
-- [ ] Verify all cross-references are valid
+- [x] Add GitHub issue and PR templates
+- [x] Update README.md to fix broken contributing/license links and add CI badge
+- [x] Verify all cross-references are valid
 
 ### Task 2: Unit Tests for internal/config Package
 
