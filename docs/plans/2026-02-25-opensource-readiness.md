@@ -108,16 +108,16 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 - Create: `internal/integration/helpers_test.go`
 - Modify: `Makefile` (add integration test targets)
 
-- [ ] Create devcontainer config with Go toolchain, Docker-in-Docker, MongoDB, Redis
-- [ ] Create docker-compose for dev environment (server, MongoDB, Redis, test runner)
-- [ ] Create test helper functions for container lifecycle management
-- [ ] Write integration test: client registers, creates tunnel, sends HTTP through tunnel
-- [ ] Write integration test: TCP tunnel creation and data forwarding
-- [ ] Write integration test: tunnel expiration and cleanup under load
-- [ ] Write integration test: multiple concurrent clients with tunnel isolation
-- [ ] Add `make test-integration` and `make test-all` Makefile targets
-- [ ] Add build tag `//go:build integration` to separate integration from unit tests
-- [ ] Run full test suite (unit + integration) - must pass before task 8
+- [x] Create devcontainer config with Go toolchain, Docker-in-Docker, MongoDB, Redis
+- [x] Create docker-compose for dev environment (server, MongoDB, Redis, test runner)
+- [x] Create test helper functions for container lifecycle management
+- [x] Write integration test: client registers, creates tunnel, sends HTTP through tunnel
+- [x] Write integration test: TCP tunnel creation and data forwarding
+- [x] Write integration test: tunnel expiration and cleanup under load
+- [x] Write integration test: multiple concurrent clients with tunnel isolation
+- [x] Add `make test-integration` and `make test-all` Makefile targets
+- [x] Add build tag `//go:build integration` to separate integration from unit tests
+- [x] Run full test suite (unit + integration) - must pass before task 8
 
 ### Task 8: CI/CD Pipeline for Tests
 

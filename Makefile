@@ -256,10 +256,22 @@ clean-all:
 	@rm -rf build
 	@rm -f $(NAME)*.pkg $(NAME)*.deb
 
-# Test
+# Test (unit tests only, excludes integration tests)
 test:
-	@echo "Running tests..."
+	@echo "Running unit tests..."
 	$(GOTEST) -v ./...
+
+# Integration tests (requires Docker for MongoDB and Redis containers)
+test-integration:
+	@echo "Running integration tests (requires Docker)..."
+	$(GOTEST) -v -tags=integration -timeout=300s ./internal/integration/...
+
+# Run all tests (unit + integration)
+test-all:
+	@echo "Running all tests..."
+	$(GOTEST) -v ./...
+	@echo "Running integration tests..."
+	$(GOTEST) -v -tags=integration -timeout=300s ./internal/integration/...
 
 # Format code
 fmt:
@@ -292,7 +304,9 @@ help:
 	@echo "  uninstall  - Uninstall the package"
 	@echo "  clean      - Clean build directory for current architecture"
 	@echo "  clean-all  - Clean build directory for all architectures"
-	@echo "  test       - Run tests"
+	@echo "  test             - Run unit tests"
+	@echo "  test-integration - Run integration tests (requires Docker)"
+	@echo "  test-all         - Run all tests (unit + integration)"
 	@echo "  fmt        - Format code"
 	@echo "  site       - Build documentation site using Docker"
 	@echo "  site-serve - Serve documentation locally (requires mkdocs)"
@@ -306,4 +320,4 @@ help:
 	@echo "  Example: make PACKAGE_FORMAT=deb"
 	@echo "  Supported formats on Linux: deb"
 
-.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test fmt site site-serve help
+.PHONY: all all-arch build prepare-package package install uninstall clean clean-all test test-integration test-all fmt site site-serve help

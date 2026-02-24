@@ -750,15 +750,8 @@ func (s *Server) Start() error {
 	// Now proceed with HTTP server setup
 	s.log.Info("Setting up HTTP servers...")
 
-	// Set up router instead of a basic mux
-	// API handlers
-	s.router.HandleFunc("/api/register", s.handleRegister)
-	s.router.HandleFunc("/api/tunnel", s.handleTunnel)
-	s.router.HandleFunc("/api/ws", s.handleWebSocket)
-	s.router.HandleFunc("/api/status", s.handleStatus)
-
-	// Default handler for tunnel requests
-	s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
+	// Register API and tunnel routes
+	s.setupRoutes()
 
 	// Create HTTPS server for API
 	s.httpServer = &http.Server{
@@ -890,7 +883,21 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// Add to the internal/server/server.go file
+// Handler sets up the routes and returns the HTTP handler for the server.
+// This can be used with httptest.NewServer for integration testing.
+func (s *Server) Handler() http.Handler {
+	s.setupRoutes()
+	return s.router
+}
+
+// setupRoutes registers all API and tunnel routes on the router.
+func (s *Server) setupRoutes() {
+	s.router.HandleFunc("/api/register", s.handleRegister)
+	s.router.HandleFunc("/api/tunnel", s.handleTunnel)
+	s.router.HandleFunc("/api/ws", s.handleWebSocket)
+	s.router.HandleFunc("/api/status", s.handleStatus)
+	s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
+}
 
 // RegistrationRequest represents a client registration request
 type RegistrationRequest struct {
