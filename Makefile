@@ -224,7 +224,7 @@ else
 	@echo "Summary: nxpose tunneling server" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "License: MIT" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Source0: $(NAME)-$(VERSION).tar.gz" >> $(RPM_SPECS)/$(NAME).spec
-	@echo "BuildArch: $(if $(filter amd64,$(ARCH)),x86_64,aarch64)" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "BuildArch: noarch" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "%description" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "A secure tunneling service to expose local services to the internet." >> $(RPM_SPECS)/$(NAME).spec
@@ -299,11 +299,10 @@ else
 	@dpkg-deb --build --root-owner-group $(BUILD_DIR) ./$(PACKAGE_NAME)
 	@echo "Created package: $(PACKAGE_NAME)"
   else ifeq ($(PACKAGE_FORMAT),rpm)
-	# Build RPM package using rpmbuild
+	# Build RPM package using rpmbuild (noarch to allow cross-build on x86_64 runners)
 	@rpmbuild --define "_topdir $(CURDIR)/$(RPM_BUILD_ROOT)" \
-		--target $(if $(filter amd64,$(ARCH)),x86_64,aarch64)-linux \
 		-bb $(RPM_SPECS)/$(NAME).spec
-	@# Copy the built RPM to the project root
+	@# Copy the built RPM to the project root with arch-specific name
 	@find $(RPM_RPMS) -name "*.rpm" -exec cp {} ./$(PACKAGE_NAME) \;
 	@echo "Created package: $(PACKAGE_NAME)"
   endif
