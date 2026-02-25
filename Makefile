@@ -217,8 +217,11 @@ else
 	@cp server-config.example.yaml $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/$(NAME)/server-config.yaml
 	@cp nxpose.service $(RPM_BUILD)/$(NAME)-$(VERSION)/etc/systemd/system/$(NAME).service
 	@cd $(RPM_BUILD) && tar czf ../SOURCES/$(NAME)-$(VERSION).tar.gz $(NAME)-$(VERSION)
-	@# Generate RPM spec file
-	@echo "Name: $(NAME)" > $(RPM_SPECS)/$(NAME).spec
+	@# Generate RPM spec file (disable strip/debug for cross-compiled binaries)
+	@echo "%define __strip /bin/true" > $(RPM_SPECS)/$(NAME).spec
+	@echo "%define debug_package %{nil}" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "Name: $(NAME)" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Version: $(VERSION)" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Release: 1" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Summary: nxpose tunneling server" >> $(RPM_SPECS)/$(NAME).spec
