@@ -158,7 +158,9 @@ func (t *TCPTunnel) handleConnection(conn *TCPConnection) {
 		}
 
 		// Update last active time
+		conn.mu.Lock()
 		conn.lastActive = time.Now()
+		conn.mu.Unlock()
 
 		// Copy data to prevent buffer reuse issues
 		data := make([]byte, n)
@@ -231,22 +233,34 @@ func (t *TCPTunnel) sendData(connectionID string, data []byte) error {
 
 	// Send data
 	conn.mu.Lock()
-	defer conn.mu.Unlock()
 
 	if conn.closed {
+		conn.mu.Unlock()
 		return fmt.Errorf("TCP connection is closed")
 	}
 
 	// Send data to the TCP connection
 	_, err := conn.conn.Write(data)
 	if err != nil {
+		// Mark as closed and close the underlying connection directly
+		// instead of calling conn.Close() which would deadlock (re-acquire conn.mu).
+		conn.closed = true
+		conn.conn.Close()
+		conn.mu.Unlock()
+
 		t.server.log.WithError(err).WithField("connection_id", connectionID).Error("Failed to write to TCP connection")
-		conn.Close()
+
+		// Remove from active connections
+		t.mu.Lock()
+		delete(t.connections, connectionID)
+		t.mu.Unlock()
+
 		return err
 	}
 
 	// Update last active time
 	conn.lastActive = time.Now()
+	conn.mu.Unlock()
 
 	t.server.log.WithFields(logrus.Fields{
 		"connection_id": connectionID,
@@ -259,9 +273,9 @@ func (t *TCPTunnel) sendData(connectionID string, data []byte) error {
 // Close closes the TCP tunnel and all its connections
 func (t *TCPTunnel) Close() error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if t.closed {
+		t.mu.Unlock()
 		return nil
 	}
 
@@ -273,8 +287,17 @@ func (t *TCPTunnel) Close() error {
 		t.listener.Close()
 	}
 
-	// Close all connections
+	// Collect connections and clear the map under the lock,
+	// then close connections outside the lock to avoid potential
+	// deadlock with handleConnection which may hold conn.mu then acquire t.mu.
+	conns := make([]*TCPConnection, 0, len(t.connections))
 	for _, conn := range t.connections {
+		conns = append(conns, conn)
+	}
+	t.connections = make(map[string]*TCPConnection)
+	t.mu.Unlock()
+
+	for _, conn := range conns {
 		conn.Close()
 	}
 

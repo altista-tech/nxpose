@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -367,7 +368,10 @@ func (h *Handler) handleJS(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
 	var buf bytes.Buffer
 	if err := h.templates.ExecuteTemplate(&buf, name, data); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		// Log detailed error server-side only; return generic message to client
+		// to avoid leaking internal paths and template details.
+		fmt.Fprintf(os.Stderr, "admin template error (%s): %v\n", name, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
