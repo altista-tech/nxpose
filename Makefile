@@ -220,6 +220,7 @@ else
 	@# Generate RPM spec file (disable strip/debug for cross-compiled binaries)
 	@echo "%define __strip /bin/true" > $(RPM_SPECS)/$(NAME).spec
 	@echo "%define debug_package %{nil}" >> $(RPM_SPECS)/$(NAME).spec
+	@echo "%define _binaries_in_noarch_packages_terminate_build 0" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Name: $(NAME)" >> $(RPM_SPECS)/$(NAME).spec
 	@echo "Version: $(VERSION)" >> $(RPM_SPECS)/$(NAME).spec
