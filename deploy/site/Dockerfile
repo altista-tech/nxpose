@@ -1,4 +1,4 @@
-FROM squidfunk/mkdocs-material:latest AS build
+FROM squidfunk/mkdocs-material:9.6 AS build
 WORKDIR /docs
 COPY site/ .
 RUN pip install pillow cairosvg

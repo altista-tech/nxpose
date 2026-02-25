@@ -301,7 +301,7 @@ else
   else ifeq ($(PACKAGE_FORMAT),rpm)
 	# Build RPM package using rpmbuild
 	@rpmbuild --define "_topdir $(CURDIR)/$(RPM_BUILD_ROOT)" \
-		--define "_target_cpu $(if $(filter amd64,$(ARCH)),x86_64,aarch64)" \
+		--target $(if $(filter amd64,$(ARCH)),x86_64,aarch64)-linux \
 		-bb $(RPM_SPECS)/$(NAME).spec
 	@# Copy the built RPM to the project root
 	@find $(RPM_RPMS) -name "*.rpm" -exec cp {} ./$(PACKAGE_NAME) \;

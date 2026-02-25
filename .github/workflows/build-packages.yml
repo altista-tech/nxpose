@@ -2,10 +2,7 @@ name: Build and Package nxpose
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 # Gate on test workflow passing: require tests to succeed before building
@@ -36,7 +33,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
           check-latest: true
 
       - name: Install dependencies
@@ -104,7 +101,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
           check-latest: true
 
       - name: Install RPM build tools
@@ -179,7 +176,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
           check-latest: true
 
       - name: Set version
@@ -218,7 +215,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: "1.24"
           check-latest: true
 
       - name: Build all client binaries
