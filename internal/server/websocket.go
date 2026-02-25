@@ -459,32 +459,29 @@ func (t *WebSocketTunnel) startPingPong() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			// Don't send pings if the connection is closed
-			t.mu.Lock()
-			if t.closed || t.Conn == nil {
-				t.mu.Unlock()
-				return
-			}
+	for range ticker.C {
+		// Don't send pings if the connection is closed
+		t.mu.Lock()
+		if t.closed || t.Conn == nil {
 			t.mu.Unlock()
-
-			// Send ping message
-			ping := TunnelMessage{
-				Type:      "ping",
-				RequestID: uuid.New().String(),
-				TunnelID:  t.TunnelID,
-				Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
-			}
-
-			if err := t.sendMessage(ping); err != nil {
-				t.server.log.WithError(err).Warn("Failed to send ping")
-				return
-			}
-
-			t.server.log.WithField("connection_id", t.ID).Debug("Sent ping")
+			return
 		}
+		t.mu.Unlock()
+
+		// Send ping message
+		ping := TunnelMessage{
+			Type:      "ping",
+			RequestID: uuid.New().String(),
+			TunnelID:  t.TunnelID,
+			Data:      json.RawMessage([]byte(`{"timestamp":"` + time.Now().Format(time.RFC3339) + `"}`)),
+		}
+
+		if err := t.sendMessage(ping); err != nil {
+			t.server.log.WithError(err).Warn("Failed to send ping")
+			return
+		}
+
+		t.server.log.WithField("connection_id", t.ID).Debug("Sent ping")
 	}
 }
 

@@ -24,9 +24,6 @@ const (
 	// StagingEnv uses Let's Encrypt staging environment
 	StagingEnv Environment = "staging"
 
-	// Default renewal settings
-	defaultRenewalDays = 30 // 30 days before expiration
-	defaultCheckHours  = 12 // check every 12 hours
 )
 
 // CertificateManagerConfig holds the configuration for the certificate manager

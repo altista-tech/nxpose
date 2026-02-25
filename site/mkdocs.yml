@@ -6,8 +6,8 @@ site_description: >-
   to the internet through encrypted tunnels. Perfect for webhook testing, sharing
   local environments, and remote access to development services.
 
-repo_name: nxrvl/nxpose
-repo_url: https://github.com/nxrvl/nxpose
+repo_name: altista-tech/nxpose
+repo_url: https://github.com/altista-tech/nxpose
 copyright: Some rights reserved &copy; 2025 NXpose Team
 
 theme:
@@ -58,10 +58,10 @@ extra:
   generator: true
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/nxrvl/nxpose
+      link: https://github.com/altista-tech/nxpose
       name: NXpose on GitHub
     - icon: fontawesome/brands/docker
-      link: https://hub.docker.com/r/nxrvl/nxpose/
+      link: https://hub.docker.com/r/altista-tech/nxpose/
       name: NXpose on Docker Hub
 
 markdown_extensions:

@@ -321,7 +321,7 @@ func (s *OAuthService) handleRegister(w http.ResponseWriter, r *http.Request) {
 			providerName = "Google"
 		default:
 			buttonClass = provider
-			providerName = strings.Title(provider)
+			providerName = strings.ToUpper(provider[:1]) + provider[1:]
 		}
 
 		html += fmt.Sprintf(`        <a href="/auth/login/%s" class="provider-button %s">Sign in with %s</a>

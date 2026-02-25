@@ -2,7 +2,6 @@ package yaml_utils
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -12,7 +11,7 @@ import (
 // and rewriting it with proper structure
 func FixYAMLFile(inputFile, outputFile string) {
 	// Read the file
-	data, err := ioutil.ReadFile(inputFile)
+	data, err := os.ReadFile(inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		return
@@ -119,7 +118,7 @@ func FixYAMLFile(inputFile, outputFile string) {
 	}
 
 	// Write to output file
-	err = ioutil.WriteFile(outputFile, newData, 0644)
+	err = os.WriteFile(outputFile, newData, 0644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
 		return

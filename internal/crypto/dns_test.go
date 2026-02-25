@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,15 +67,15 @@ func TestDNSProviderWrapper_MethodsWithNonImplementingProvider(t *testing.T) {
 	wrapper := &DNSProviderWrapper{provider: struct{}{}}
 
 	// All methods should return nil gracefully
-	records, err := wrapper.GetRecords(nil, "example.com.")
+	records, err := wrapper.GetRecords(context.TODO(), "example.com.")
 	assert.NoError(t, err)
 	assert.Nil(t, records)
 
-	records, err = wrapper.AppendRecords(nil, "example.com.", nil)
+	records, err = wrapper.AppendRecords(context.TODO(), "example.com.", nil)
 	assert.NoError(t, err)
 	assert.Nil(t, records)
 
-	records, err = wrapper.DeleteRecords(nil, "example.com.", nil)
+	records, err = wrapper.DeleteRecords(context.TODO(), "example.com.", nil)
 	assert.NoError(t, err)
 	assert.Nil(t, records)
 

@@ -2,7 +2,6 @@ package yaml_utils
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -11,7 +10,7 @@ import (
 // CheckYAMLFile is a debugging utility to check YAML parsing
 func CheckYAMLFile(filename string) {
 	// Read the file
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		return
@@ -78,7 +77,7 @@ func CheckYAMLFile(filename string) {
 // DirectUnmarshalOAuth2 directly unmarshals only the oauth2 section
 func DirectUnmarshalOAuth2(filename string) {
 	// Read the file
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		return

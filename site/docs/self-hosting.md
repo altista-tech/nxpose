@@ -35,7 +35,7 @@ version: "3.8"
 
 services:
   nxpose:
-    image: ghcr.io/nxrvl/nxpose-server:latest
+    image: ghcr.io/altista-tech/nxpose-server:latest
     ports:
       - "8443:8443"
       - "80:80"          # For Let's Encrypt HTTP challenge
@@ -76,7 +76,7 @@ docker compose up -d
 #### Debian / Ubuntu
 
 ```bash
-wget https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_linux_amd64.deb
+wget https://github.com/altista-tech/nxpose/releases/latest/download/nxpose_linux_amd64.deb
 sudo dpkg -i nxpose_linux_amd64.deb
 ```
 
@@ -85,21 +85,21 @@ The DEB package installs the server binary and sets up a systemd service.
 #### RHEL / Fedora / CentOS
 
 ```bash
-wget https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_linux_amd64.rpm
+wget https://github.com/altista-tech/nxpose/releases/latest/download/nxpose_linux_amd64.rpm
 sudo rpm -i nxpose_linux_amd64.rpm
 ```
 
 #### macOS
 
 ```bash
-wget https://github.com/nxrvl/nxpose/releases/latest/download/nxpose_darwin_arm64.pkg
+wget https://github.com/altista-tech/nxpose/releases/latest/download/nxpose_darwin_arm64.pkg
 sudo installer -pkg nxpose_darwin_arm64.pkg -target /
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/nxrvl/nxpose.git
+git clone https://github.com/altista-tech/nxpose.git
 cd nxpose
 make build
 sudo cp bin/nxpose-server /usr/local/bin/

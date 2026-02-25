@@ -148,7 +148,7 @@ func createExposeCommand() *cobra.Command {
 			}).Info("Exposing local service")
 
 			// Check if we have certificate data
-			if cfg.CertData == nil || len(cfg.CertData) == 0 {
+			if len(cfg.CertData) == 0 {
 				// Try to load from file
 				certData, err := config.LoadCertificateData("")
 				if err != nil {

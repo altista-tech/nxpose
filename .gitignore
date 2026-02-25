@@ -7,9 +7,22 @@ vendor/
 # Build artifacts
 /client
 /server
+/dist/
+/build/
+*.deb
+*.rpm
+*.pkg
 
 # AI tools
 CLAUDE.md
 .claude/
 .ralphex/
 .dlcatignore
+.serena/
+
+# Site build cache
+site/.cache/
+
+# Test artifacts
+coverage.out
+coverage.html

@@ -59,8 +59,8 @@ make build
 
 ### Reporting Bugs
 
-1. Check [existing issues](https://github.com/nxrvl/nxpose/issues) to avoid duplicates.
-2. Use the [bug report template](https://github.com/nxrvl/nxpose/issues/new?template=bug_report.md).
+1. Check [existing issues](https://github.com/altista-tech/nxpose/issues) to avoid duplicates.
+2. Use the [bug report template](https://github.com/altista-tech/nxpose/issues/new?template=bug_report.md).
 3. Include:
    - Clear description of the problem
    - Steps to reproduce
@@ -70,7 +70,7 @@ make build
 
 ### Suggesting Features
 
-1. Use the [feature request template](https://github.com/nxrvl/nxpose/issues/new?template=feature_request.md).
+1. Use the [feature request template](https://github.com/altista-tech/nxpose/issues/new?template=feature_request.md).
 2. Describe the feature, its use case, and why it would be useful.
 
 ### Pull Request Workflow

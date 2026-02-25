@@ -18,6 +18,8 @@ jobs:
   tests:
     name: Run Tests
     uses: ./.github/workflows/test.yml
+    permissions:
+      contents: write
 
   build-deb:
     name: Build DEB (${{ matrix.arch }})
@@ -70,7 +72,7 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
           else
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            VERSION="1.0.0-dev.${TIMESTAMP}"
+            VERSION="1.0.0~dev.${TIMESTAMP}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -138,7 +140,7 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
           else
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            VERSION="1.0.0-dev.${TIMESTAMP}"
+            VERSION="1.0.0~dev.${TIMESTAMP}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -187,7 +189,7 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
           else
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            VERSION="1.0.0-dev.${TIMESTAMP}"
+            VERSION="1.0.0~dev.${TIMESTAMP}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -253,6 +255,18 @@ jobs:
           echo "Release assets:"
           ls -la release-assets/
 
+      - name: Create tarballs for Homebrew
+        run: |
+          cd release-assets
+          for binary in nxpose-darwin-amd64 nxpose-darwin-arm64; do
+            if [ -f "$binary" ]; then
+              mkdir -p tmp
+              cp "$binary" tmp/nxpose
+              tar -czf "${binary}.tar.gz" -C tmp nxpose
+              rm -rf tmp
+            fi
+          done
+
       - name: Generate checksums
         run: |
           cd release-assets
@@ -268,58 +282,116 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  upload-to-digitalocean:
-    name: Upload to DigitalOcean Spaces
-    needs: [build-deb, build-rpm, build-macos-pkg, build-client-binaries]
-    if: github.event_name != 'pull_request'
+  deploy-site:
+    name: Deploy Documentation Site
+    needs: tests
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment package
+        run: |
+          mkdir -p staging
+          cp deploy/site/Dockerfile staging/
+          cp deploy/site/docker-compose.yml staging/
+          cp -r site staging/
+
+      - name: Clean old site on server
+        uses: appleboy/ssh-action@v1
         with:
-          path: dist
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            rm -rf /opt/nxpose.mpanin.me/site
+            mkdir -p /opt/nxpose.mpanin.me
 
-      - name: List packages
-        run: find dist -type f | sort
+      - name: Copy files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          source: "staging/Dockerfile,staging/docker-compose.yml,staging/site"
+          target: /opt/nxpose.mpanin.me
+          strip_components: 1
 
-      - name: Install AWS CLI
+      - name: Build and start container
+        uses: appleboy/ssh-action@v1
+        with:
+          host: mpanin.me
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /opt/nxpose.mpanin.me
+            docker compose up -d --build
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download macOS tarballs
         run: |
-          if aws --version &> /dev/null; then
-            echo "AWS CLI is already installed:"
-            aws --version
-          else
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-          fi
-
-      - name: Configure AWS CLI for DigitalOcean Spaces
+          gh release download "v${{ steps.version.outputs.version }}" \
+            --repo ${{ github.repository }} \
+            --pattern "nxpose-darwin-*.tar.gz" \
+            --dir ./dl
         env:
-          DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
-          DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
-          DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
-        run: |
-          aws configure set aws_access_key_id $DO_SPACES_KEY
-          aws configure set aws_secret_access_key $DO_SPACES_SECRET
-          aws configure set default.region us-east-1
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload packages to DigitalOcean Spaces
+      - name: Compute SHA256 and update formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          SHA_ARM64=$(sha256sum dl/nxpose-darwin-arm64.tar.gz | awk '{print $1}')
+          SHA_AMD64=$(sha256sum dl/nxpose-darwin-amd64.tar.gz | awk '{print $1}')
+          REPO=${{ github.repository }}
+
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/nxrvl/homebrew-tap.git tap
+          mkdir -p tap/Formula
+
+          cat > tap/Formula/nxpose.rb << FORMULA_EOF
+          class Nxpose < Formula
+            desc "Secure tunneling client - expose local services to the internet"
+            homepage "https://nxpose.mpanin.me"
+            license "MIT"
+            version "${VERSION}"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/nxpose-darwin-arm64.tar.gz"
+                sha256 "${SHA_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/nxpose-darwin-amd64.tar.gz"
+                sha256 "${SHA_AMD64}"
+              end
+            end
+
+            def install
+              bin.install "nxpose"
+            end
+
+            test do
+              assert_match "nxpose", shell_output("#{bin}/nxpose --help")
+            end
+          end
+          FORMULA_EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/nxpose.rb
+          git commit -m "Update nxpose to ${VERSION}"
+          git push
         env:
-          DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
-          DO_SPACES_ENDPOINT: ${{ secrets.DO_SPACES_ENDPOINT }}
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            S3_VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            S3_VERSION="latest"
-          fi
-
-          find dist -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.pkg" -o -name "nxpose-*" \) | while read -r pkg; do
-            filename=$(basename "$pkg")
-            aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/${S3_VERSION}/$filename" --endpoint=https://${DO_SPACES_ENDPOINT}
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-              aws s3 cp "$pkg" "s3://${DO_SPACES_BUCKET}/nxpose-packages/latest/$filename" --endpoint=https://${DO_SPACES_ENDPOINT}
-            fi
-            echo "Uploaded $filename to DigitalOcean Spaces"
-          done
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

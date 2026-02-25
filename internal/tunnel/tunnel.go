@@ -76,7 +76,7 @@ type TCPMessage struct {
 
 func ExposeLocalService(protocol string, port int, certData []byte, serverHost string, serverPort int) (string, string, error) {
 	// Check if certificate data is provided
-	if certData == nil || len(certData) == 0 {
+	if len(certData) == 0 {
 		return "", "", fmt.Errorf("no certificate data available, please run 'nxpose register' first")
 	}
 
@@ -597,10 +597,9 @@ func (t *Tunnel) connectWebSocket() error {
 		wsConn, err = websocket.DialConfig(altConfig)
 		if err != nil {
 			// Try one more time with the main domain instead of subdomain
-			mainDomain := t.ServerHost
 			if dots := strings.Count(t.ServerHost, "."); dots >= 2 {
 				mainDomainParts := strings.SplitN(t.ServerHost, ".", 2)
-				mainDomain = mainDomainParts[1]
+				mainDomain := mainDomainParts[1]
 
 				t.log.WithField("mainDomain", mainDomain).Info("Trying with main domain instead of subdomain")
 

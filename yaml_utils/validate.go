@@ -2,7 +2,6 @@ package yaml_utils
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,7 +31,7 @@ type ConfigFile struct {
 // ValidateGitHubCredentials validates GitHub credentials directly without going through Viper
 func ValidateGitHubCredentials(configFile string) {
 	// Read the file
-	data, err := ioutil.ReadFile(configFile)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		return

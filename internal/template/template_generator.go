@@ -115,7 +115,12 @@ func loadTemplate(name string) (*template.Template, error) {
 
 	// Parse the template with several useful functions
 	funcMap := template.FuncMap{
-		"title": strings.Title,
+		"title": func(s string) string {
+			if len(s) == 0 {
+				return s
+			}
+			return strings.ToUpper(s[:1]) + s[1:]
+		},
 		"slice": func(s string, i, j int) string {
 			if i >= len(s) {
 				return ""

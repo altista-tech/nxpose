@@ -1,7 +1,7 @@
 # nxpose
 
-[![Build](https://github.com/nxrvl/nxpose/actions/workflows/build-packages.yml/badge.svg)](https://github.com/nxrvl/nxpose/actions/workflows/build-packages.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nxrvl/nxpose)](https://goreportcard.com/report/github.com/nxrvl/nxpose)
+[![Build](https://github.com/altista-tech/nxpose/actions/workflows/build-packages.yml/badge.svg)](https://github.com/altista-tech/nxpose/actions/workflows/build-packages.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/altista-tech/nxpose)](https://goreportcard.com/report/github.com/altista-tech/nxpose)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A secure, self-hosted tunneling service to expose local services to the internet. Think ngrok, but you own the infrastructure.
@@ -25,7 +25,7 @@ A secure, self-hosted tunneling service to expose local services to the internet
 go install nxpose/cmd/client@latest
 
 # Or clone and build
-git clone https://github.com/nxrvl/nxpose.git
+git clone https://github.com/altista-tech/nxpose.git
 cd nxpose
 cd cmd/client && go build -o nxpose
 ```

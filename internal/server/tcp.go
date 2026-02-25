@@ -220,56 +220,6 @@ func (t *TCPTunnel) handleConnection(conn *TCPConnection) {
 	}).Info("TCP connection closed")
 }
 
-// sendData sends data to a TCP connection
-func (t *TCPTunnel) sendData(connectionID string, data []byte) error {
-	// Find the connection
-	t.mu.Lock()
-	conn, exists := t.connections[connectionID]
-	t.mu.Unlock()
-
-	if !exists {
-		return fmt.Errorf("TCP connection not found: %s", connectionID)
-	}
-
-	// Send data
-	conn.mu.Lock()
-
-	if conn.closed {
-		conn.mu.Unlock()
-		return fmt.Errorf("TCP connection is closed")
-	}
-
-	// Send data to the TCP connection
-	_, err := conn.conn.Write(data)
-	if err != nil {
-		// Mark as closed and close the underlying connection directly
-		// instead of calling conn.Close() which would deadlock (re-acquire conn.mu).
-		conn.closed = true
-		conn.conn.Close()
-		conn.mu.Unlock()
-
-		t.server.log.WithError(err).WithField("connection_id", connectionID).Error("Failed to write to TCP connection")
-
-		// Remove from active connections
-		t.mu.Lock()
-		delete(t.connections, connectionID)
-		t.mu.Unlock()
-
-		return err
-	}
-
-	// Update last active time
-	conn.lastActive = time.Now()
-	conn.mu.Unlock()
-
-	t.server.log.WithFields(logrus.Fields{
-		"connection_id": connectionID,
-		"data_size":     len(data),
-	}).Debug("Sent TCP data to connection")
-
-	return nil
-}
-
 // Close closes the TCP tunnel and all its connections
 func (t *TCPTunnel) Close() error {
 	t.mu.Lock()

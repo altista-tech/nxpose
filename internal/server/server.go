@@ -1,12 +1,12 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"nxpose/internal/crypto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,14 +17,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
-	"golang.org/x/net/context"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/net/websocket"
 
 	"nxpose/internal/admin"
 	"nxpose/internal/config"
+	"nxpose/internal/crypto"
 	"nxpose/internal/logger"
-
-	"github.com/sirupsen/logrus"
 )
 
 // Tunnel represents an active tunnel
@@ -97,7 +96,7 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 	switch config.OAuth2.SessionStore {
 	case "redis":
 		if !config.Redis.Enabled {
-			return nil, fmt.Errorf("Redis session store requested but Redis is not enabled")
+			return nil, fmt.Errorf("redis session store requested but Redis is not enabled")
 		}
 		var err error
 		sessionStore, err = CreateSessionStore(config.OAuth2.SessionKey)
@@ -503,7 +502,7 @@ func (s *Server) initCertificateManager(ctx context.Context) error {
 
 	// Validate required configuration
 	if s.config.LetsEncrypt.Email == "" {
-		return fmt.Errorf("Let's Encrypt email address is required")
+		return fmt.Errorf("let's Encrypt email address is required")
 	}
 
 	// Set up domains to request certificates for

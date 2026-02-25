@@ -1,0 +1,17 @@
+services:
+  app:
+    container_name: nxpose-site
+    restart: unless-stopped
+    build: .
+    labels:
+      - "reproxy.server=nxpose.mpanin.me"
+      - "reproxy.route=^/(.*)"
+      - "reproxy.dest=/$1"
+      - "reproxy.port=80"
+      - "reproxy.keep-host=true"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
