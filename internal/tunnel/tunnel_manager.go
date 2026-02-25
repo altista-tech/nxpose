@@ -240,51 +240,66 @@ func (tm *TunnelManager) autosaveRoutine() {
 	}
 }
 
-// cleanupStaleTunnels removes or reconnects inactive tunnels
+// cleanupStaleTunnels removes or reconnects inactive tunnels.
+// Collects expired tunnels under the lock, then performs I/O (tunnel.Stop,
+// Redis decrement) outside it to avoid blocking all tunnel operations.
 func (tm *TunnelManager) cleanupStaleTunnels() {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+	type expiredTunnel struct {
+		id     string
+		userID string
+		tunnel *Tunnel
+		active bool
+	}
 
+	var expired []expiredTunnel
+
+	tm.mu.Lock()
 	now := time.Now()
 	for id, tunnel := range tm.tunnels {
-		// Check if tunnel is expired based on max connection time
 		if !tunnel.ExpiresAt.IsZero() && now.After(tunnel.ExpiresAt) {
 			tm.log.Infof("Removing expired tunnel %s", id)
 
-			// Close the tunnel if it's active
+			// Signal stop under lock (non-blocking channel close)
 			if tunnel.Active {
 				tunnel.stop()
-				if tunnel.tunnel != nil {
-					_ = tunnel.tunnel.Stop()
-				}
 			}
+
+			expired = append(expired, expiredTunnel{
+				id:     id,
+				userID: tunnel.UserID,
+				tunnel: tunnel.tunnel,
+				active: tunnel.Active,
+			})
 
 			// Remove from userTunnels map
 			if tunnel.UserID != "" {
 				if tunnels, exists := tm.userTunnels[tunnel.UserID]; exists {
 					delete(tunnels, id)
-
-					// Remove user entry if they have no more tunnels
 					if len(tunnels) == 0 {
 						delete(tm.userTunnels, tunnel.UserID)
 					}
 				}
-
-				// If Redis client is available, decrement the user's tunnel count
-				if tm.redisClient != nil {
-					if redisClient, ok := tm.redisClient.(interface {
-						DecrementTunnelCount(userID string) (int, error)
-					}); ok {
-						_, err := redisClient.DecrementTunnelCount(tunnel.UserID)
-						if err != nil {
-							tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
-						}
-					}
-				}
 			}
 
-			// Remove from tunnels map
 			delete(tm.tunnels, id)
+		}
+	}
+	tm.mu.Unlock()
+
+	// Perform blocking I/O outside the lock
+	for _, et := range expired {
+		if et.active && et.tunnel != nil {
+			_ = et.tunnel.Stop()
+		}
+
+		if et.userID != "" && tm.redisClient != nil {
+			if redisClient, ok := tm.redisClient.(interface {
+				DecrementTunnelCount(userID string) (int, error)
+			}); ok {
+				if _, err := redisClient.DecrementTunnelCount(et.userID); err != nil {
+					tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+				}
+			}
 		}
 	}
 }
@@ -512,50 +527,54 @@ func (tm *TunnelManager) GetTunnelByPort(protocol string, port int) (*TunnelInfo
 	return nil, false
 }
 
-// RemoveTunnel stops and removes a tunnel from the manager
+// RemoveTunnel stops and removes a tunnel from the manager.
+// Map operations happen under the lock; blocking I/O (tunnel.Stop, Redis)
+// is performed after releasing it.
 func (tm *TunnelManager) RemoveTunnel(id string) bool {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
 
 	tunnel, exists := tm.tunnels[id]
 	if !exists {
+		tm.mu.Unlock()
 		return false
 	}
 
-	// Close the tunnel if it's active
-	if tunnel.Active {
+	wasActive := tunnel.Active
+	innerTunnel := tunnel.tunnel
+	userID := tunnel.UserID
+
+	// Signal stop under lock (non-blocking channel close)
+	if wasActive {
 		tunnel.stop()
-		if tunnel.tunnel != nil {
-			_ = tunnel.tunnel.Stop()
-		}
 	}
 
 	// Remove from userTunnels map
-	if tunnel.UserID != "" {
-		if tunnels, exists := tm.userTunnels[tunnel.UserID]; exists {
+	if userID != "" {
+		if tunnels, exists := tm.userTunnels[userID]; exists {
 			delete(tunnels, id)
-
-			// Remove user entry if they have no more tunnels
 			if len(tunnels) == 0 {
-				delete(tm.userTunnels, tunnel.UserID)
-			}
-		}
-
-		// If Redis client is available, decrement the user's tunnel count
-		if tm.redisClient != nil {
-			if redisClient, ok := tm.redisClient.(interface {
-				DecrementTunnelCount(userID string) (int, error)
-			}); ok {
-				_, err := redisClient.DecrementTunnelCount(tunnel.UserID)
-				if err != nil {
-					tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
-				}
+				delete(tm.userTunnels, userID)
 			}
 		}
 	}
 
-	// Remove from tunnels map
 	delete(tm.tunnels, id)
+	tm.mu.Unlock()
+
+	// Perform blocking I/O outside the lock
+	if wasActive && innerTunnel != nil {
+		_ = innerTunnel.Stop()
+	}
+
+	if userID != "" && tm.redisClient != nil {
+		if redisClient, ok := tm.redisClient.(interface {
+			DecrementTunnelCount(userID string) (int, error)
+		}); ok {
+			if _, err := redisClient.DecrementTunnelCount(userID); err != nil {
+				tm.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+			}
+		}
+	}
 
 	return true
 }

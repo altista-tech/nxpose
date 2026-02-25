@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net/http"
 	"nxpose/internal/crypto"
-	"nxpose/internal/tunnel"
 	"os"
 	"path/filepath"
 	"strings"
@@ -236,21 +235,6 @@ func NewServer(config *config.ServerConfig, tlsConfig *tls.Config, log *logger.L
 
 			log.Info("OAuth2 authentication service initialized")
 		}
-	}
-
-	// Update tunnel manager initialization with user limits
-	tunnelConfigDir := filepath.Join(os.TempDir(), "nxpose", "tunnels")
-	tunnelManager := tunnel.NewTunnelManager(
-		tunnelConfigDir,
-		config.TunnelLimits.MaxPerUser, // Use MaxPerUser for the max tunnels limit
-		config.TunnelLimits.MaxPerUser,
-		config.TunnelLimits.MaxConnection,
-	)
-
-	// Set Redis client for the tunnel manager if Redis is enabled
-	if redis != nil {
-		tunnelManager.SetRedisClient(redis)
-		log.Info("Tunnel manager using Redis for tunnel limits")
 	}
 
 	return server, nil
@@ -1404,9 +1388,14 @@ func (m *WebSocketManager) CloseAll() {
 	}
 	m.tunnels = make(map[string]*WebSocketTunnel)
 
-	// Clear the requests map and close all waiting channels
+	// Cancel all waiting requests by sending nil (not closing, which would
+	// panic if HandleResponse concurrently sends on the same channel).
+	// sendHTTPRequest already handles nil responses as "tunnel shutting down".
 	for id, ch := range m.requests {
-		close(ch)
+		select {
+		case ch <- nil:
+		default:
+		}
 		delete(m.requests, id)
 	}
 	m.mu.Unlock()

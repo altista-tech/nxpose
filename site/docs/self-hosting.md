@@ -129,7 +129,6 @@ tls:
 
 tunnels:
   max_per_user: 10
-  max_per_client: 5
 ```
 
 ### With Let's Encrypt

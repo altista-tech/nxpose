@@ -129,9 +129,6 @@ letsencrypt:
 
 # Tunnel settings
 tunnels:
-  # Maximum number of tunnels per client
-  max_per_client: 5
-
   # Maximum number of tunnels per user
   # Limits how many tunnels a single user can create across all their clients
   max_per_user: 10

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -349,13 +348,7 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 				for i, p := range providers {
 					fmt.Printf("DEBUG:   Provider #%d: %s\n", i+1, p.Name)
 					fmt.Printf("DEBUG:     - ClientID: '%s' (length: %d)\n", p.ClientID, len(p.ClientID))
-					fmt.Printf("DEBUG:     - ClientSecret: '%s' (length: %d)\n",
-						func() string {
-							if len(p.ClientSecret) > 8 {
-								return p.ClientSecret[:4] + "..." + p.ClientSecret[len(p.ClientSecret)-4:]
-							}
-							return strings.Repeat("*", len(p.ClientSecret))
-						}(),
+					fmt.Printf("DEBUG:     - ClientSecret: [REDACTED] (length: %d)\n",
 						len(p.ClientSecret))
 					fmt.Printf("DEBUG:     - Scopes: %v\n", p.Scopes)
 				}
