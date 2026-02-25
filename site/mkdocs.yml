@@ -11,6 +11,7 @@ copyright: "&copy; 2026 Maksim Panin &mdash; me@mpanin.me"
 
 theme:
   name: material
+  custom_dir: overrides
   favicon: favicon.svg
   language: en
   palette:
