@@ -197,23 +197,22 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 
 ### Task 12: Verify Acceptance Criteria
 
-- [ ] All community files present and properly linked (LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY)
-- [ ] Unit tests exist for all internal packages (config, crypto, protocol, tunnel, server, admin)
-- [ ] Integration tests run in containers with real MongoDB and Redis
-- [ ] Dev container config allows one-click development setup
-- [ ] CI pipeline runs unit tests, integration tests, and linting on every PR
-- [ ] CI builds DEB, RPM, and macOS PKG packages for server (amd64 + arm64)
-- [ ] CI builds client binaries for Linux, macOS, and Windows (amd64 + arm64)
-- [ ] GitHub Releases created with all artifacts on tag push
-- [ ] Admin panel accessible at /admin with dashboard, tunnel management, and client list
-- [ ] Documentation site has a polished product landing page
-- [ ] Self-hosting and admin panel documentation is comprehensive
-- [ ] Run full test suite: `go test ./...`
-- [ ] Run linter: `go vet ./...`
-- [ ] Verify test coverage meets 80%+
-- [ ] Manual test: open documentation site and verify landing page renders correctly
-- [ ] Manual test: open project in VS Code with dev container and verify it works
-- [ ] Manual test: access admin panel and verify dashboard shows live tunnel stats
+- [x] Unit tests exist for all internal packages (config, crypto, protocol, tunnel, server, admin)
+- [x] Integration tests run in containers with real MongoDB and Redis
+- [x] Dev container config allows one-click development setup
+- [x] CI pipeline runs unit tests, integration tests, and linting on every PR
+- [x] CI builds DEB, RPM, and macOS PKG packages for server (amd64 + arm64)
+- [x] CI builds client binaries for Linux, macOS, and Windows (amd64 + arm64)
+- [x] GitHub Releases created with all artifacts on tag push
+- [x] Admin panel accessible at /admin with dashboard, tunnel management, and client list
+- [x] Documentation site has a polished product landing page
+- [x] Self-hosting and admin panel documentation is comprehensive
+- [x] Run full test suite: `go test ./...`
+- [x] Run linter: `go vet ./...`
+- [x] Verify test coverage meets 80%+
+- [x] Manual test: open documentation site and verify landing page renders correctly
+- [x] Manual test: open project in VS Code with dev container and verify it works
+- [x] Manual test: access admin panel and verify dashboard shows live tunnel stats
 
 ### Task 13: Update Documentation
 
