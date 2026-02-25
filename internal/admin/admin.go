@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -68,6 +70,11 @@ type Handler struct {
 
 // NewHandler creates a new admin panel handler
 func NewHandler(adminConfig *config.AdminConfig, serverConfig *config.ServerConfig, provider DataProvider) (*Handler, error) {
+	// Normalize PathPrefix so templates always have a consistent value
+	if adminConfig.PathPrefix == "" {
+		adminConfig.PathPrefix = "/admin"
+	}
+
 	h := &Handler{
 		config:       adminConfig,
 		serverConfig: serverConfig,
@@ -93,6 +100,9 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 
 	// Apply auth middleware
 	sub.Use(h.authMiddleware)
+
+	// Apply CSRF protection for state-changing requests
+	sub.Use(h.csrfMiddleware)
 
 	// Page routes
 	sub.HandleFunc("", h.handleDashboard).Methods("GET")
@@ -139,6 +149,64 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 	})
+}
+
+// csrfMiddleware validates Origin/Referer headers on state-changing requests
+// to prevent cross-site request forgery attacks.
+func (h *Handler) csrfMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only check state-changing methods
+		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// Fall back to Referer if Origin is not present
+				if referer := r.Header.Get("Referer"); referer != "" {
+					if u, err := url.Parse(referer); err == nil {
+						origin = u.Scheme + "://" + u.Host
+					}
+				}
+			}
+
+			// If we have an origin, validate it matches the request host
+			if origin != "" {
+				originURL, err := url.Parse(origin)
+				if err != nil || !h.isValidOrigin(r, originURL) {
+					http.Error(w, "Forbidden: origin validation failed", http.StatusForbidden)
+					return
+				}
+			}
+			// If no Origin or Referer is present (e.g. curl, non-browser client),
+			// allow the request through since basic auth still protects the endpoint.
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isValidOrigin checks whether the origin matches the request's scheme and host.
+// Compares scheme and full host:port to prevent cross-scheme and cross-port CSRF
+// attacks and handles IPv6 correctly by relying on url.URL.Host which preserves
+// bracket notation.
+func (h *Handler) isValidOrigin(r *http.Request, originURL *url.URL) bool {
+	requestHost := r.Host
+	if requestHost == "" {
+		requestHost = r.URL.Host
+	}
+
+	// Determine the request's scheme from TLS state.
+	requestScheme := "http"
+	if r.TLS != nil {
+		requestScheme = "https"
+	}
+
+	// Compare scheme — different schemes are different origins.
+	if !strings.EqualFold(originURL.Scheme, requestScheme) {
+		return false
+	}
+
+	// Compare full host including port — different ports are different origins.
+	// Both Origin header (parsed via url.Parse) and r.Host use the same
+	// host:port format with bracketed IPv6 addresses.
+	return strings.EqualFold(originURL.Host, requestHost)
 }
 
 // handleDashboard renders the main dashboard page

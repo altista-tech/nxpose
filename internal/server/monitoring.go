@@ -49,18 +49,18 @@ func (s *Server) cleanupInactiveTunnels() {
 
 		// If there's no active WebSocket connection and it's been inactive for too long, remove it
 		if !connected {
-			if now.Sub(tunnel.LastActive) > inactiveThreshold {
+			if now.Sub(tunnel.GetLastActive()) > inactiveThreshold {
 				tunnelsToRemove = append(tunnelsToRemove, id)
 				s.log.WithFields(logrus.Fields{
 					"tunnel_id":   id,
 					"subdomain":   tunnel.Subdomain,
-					"last_active": tunnel.LastActive,
+					"last_active": tunnel.GetLastActive(),
 				}).Info("Removing inactive tunnel (no WebSocket connection)")
 				continue
 			}
 		} else if wsTunnel != nil {
 			// Update the tunnel's last activity time based on the WebSocket connection
-			tunnel.LastActive = wsTunnel.LastActive
+			tunnel.SetLastActive(wsTunnel.GetLastActive())
 		}
 
 		// Check if the tunnel has expired (based on creation time)

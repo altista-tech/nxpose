@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -676,6 +677,136 @@ func TestCustomPathPrefix(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Dashboard")
 	// Links should use custom prefix
 	assert.Contains(t, w.Body.String(), "/custom-admin/tunnels")
+}
+
+// TestCSRFSameOriginAllowed tests that same-origin POST requests pass CSRF check
+func TestCSRFSameOriginAllowed(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "localhost:8443"
+	req.TLS = &tls.ConnectionState{} // Simulate HTTPS request
+	req.Header.Set("Origin", "https://localhost:8443")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestCSRFCrossPortBlocked tests that different-port origins are rejected
+func TestCSRFCrossPortBlocked(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "localhost:8443"
+	req.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestCSRFCrossHostBlocked tests that different-host origins are rejected
+func TestCSRFCrossHostBlocked(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "admin.example.com"
+	req.Header.Set("Origin", "https://evil.com")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestCSRFCrossSchemeBlocked tests that http origins are rejected for HTTPS requests
+func TestCSRFCrossSchemeBlocked(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "admin.example.com"
+	req.TLS = &tls.ConnectionState{} // Server is HTTPS
+	req.Header.Set("Origin", "http://admin.example.com") // Origin is HTTP
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestCSRFIPv6OriginAllowed tests that matching IPv6 origins pass CSRF check
+func TestCSRFIPv6OriginAllowed(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "[::1]:8443"
+	req.TLS = &tls.ConnectionState{} // Simulate HTTPS request
+	req.Header.Set("Origin", "https://[::1]:8443")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestCSRFIPv6CrossPortBlocked tests that IPv6 origins with different ports are rejected
+func TestCSRFIPv6CrossPortBlocked(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "[::1]:8443"
+	req.Header.Set("Origin", "http://[::1]:3000")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestCSRFNoOriginAllowed tests that requests without Origin/Referer pass through
+// (non-browser clients like curl are protected by basic auth instead)
+func TestCSRFNoOriginAllowed(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	// No Origin or Referer header
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestCSRFRefererFallback tests that Referer is used when Origin is absent
+func TestCSRFRefererFallback(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	// Matching referer should pass
+	req := httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "localhost:8443"
+	req.TLS = &tls.ConnectionState{} // Simulate HTTPS request
+	req.Header.Set("Referer", "https://localhost:8443/admin/settings")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Mismatched referer should fail
+	req = httptest.NewRequest("POST", "/admin/api/settings/maintenance", nil)
+	req.Host = "localhost:8443"
+	req.Header.Set("Referer", "http://evil.com/attack")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// TestCSRFGetRequestsSkipped tests that GET/HEAD/OPTIONS bypass CSRF checks
+func TestCSRFGetRequestsSkipped(t *testing.T) {
+	_, router, _ := setupTestHandler(t)
+
+	// GET with mismatched origin should still work (CSRF only checks state-changing methods)
+	req := httptest.NewRequest("GET", "/admin/api/stats", nil)
+	req.Host = "localhost:8443"
+	req.Header.Set("Origin", "https://evil.com")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // TestDashboardWithRedirectFromBase tests dashboard without trailing slash

@@ -36,9 +36,19 @@ type Tunnel struct {
 	Subdomain   string
 	TargetPort  int
 	CreateTime  time.Time
-	LastActive  time.Time
+	lastActive  int64 // Unix nano, use GetLastActive/SetLastActive for atomic access
 	ExpiresAt   time.Time
 	connections int64
+}
+
+// GetLastActive returns the last active time using atomic load.
+func (t *Tunnel) GetLastActive() time.Time {
+	return time.Unix(0, atomic.LoadInt64(&t.lastActive))
+}
+
+// SetLastActive sets the last active time using atomic store.
+func (t *Tunnel) SetLastActive(ts time.Time) {
+	atomic.StoreInt64(&t.lastActive, ts.UnixNano())
 }
 
 // TunnelRegistry keeps track of active tunnels
@@ -410,7 +420,7 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update last active timestamp and connection count atomically
-	tunnel.LastActive = time.Now()
+	tunnel.SetLastActive(time.Now())
 	atomic.AddInt64(&tunnel.connections, 1)
 
 	// Determine if request is HTTP or HTTPS based on TLS connection
@@ -1170,9 +1180,9 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		Subdomain:  subdomain,
 		TargetPort: reqBody.Port,
 		CreateTime: time.Now(),
-		LastActive: time.Now(),
 		ExpiresAt:  expiresAt,
 	}
+	tunnel.SetLastActive(time.Now())
 
 	// Store tunnel
 	s.tunnels.mu.Lock()

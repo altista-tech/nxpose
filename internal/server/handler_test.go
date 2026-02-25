@@ -449,15 +449,16 @@ func TestHandleTunnelRequest_MatchingSubdomain_NoWebSocket_Returns503(t *testing
 	// Create a tunnel in the registry directly
 	tunnelID := "test-tunnel-id"
 	srv.tunnels.mu.Lock()
-	srv.tunnels.tunnels[tunnelID] = &Tunnel{
+	tunnel := &Tunnel{
 		ID:         tunnelID,
 		ClientID:   "test-client",
 		Protocol:   "http",
 		Subdomain:  "myapp",
 		TargetPort: 8080,
 		CreateTime: time.Now(),
-		LastActive: time.Now(),
 	}
+	tunnel.SetLastActive(time.Now())
+	srv.tunnels.tunnels[tunnelID] = tunnel
 	srv.tunnels.mu.Unlock()
 
 	req, _ := http.NewRequest("GET", "/somepath", nil)
@@ -477,15 +478,16 @@ func TestHandleTunnelRequest_UpdatesLastActive(t *testing.T) {
 	tunnelID := "test-tunnel-active"
 	oldTime := time.Now().Add(-1 * time.Hour)
 	srv.tunnels.mu.Lock()
-	srv.tunnels.tunnels[tunnelID] = &Tunnel{
+	tunnel := &Tunnel{
 		ID:         tunnelID,
 		ClientID:   "test-client",
 		Protocol:   "http",
 		Subdomain:  "activetest",
 		TargetPort: 8080,
 		CreateTime: oldTime,
-		LastActive: oldTime,
 	}
+	tunnel.SetLastActive(oldTime)
+	srv.tunnels.tunnels[tunnelID] = tunnel
 	srv.tunnels.mu.Unlock()
 
 	req, _ := http.NewRequest("GET", "/", nil)
@@ -495,10 +497,10 @@ func TestHandleTunnelRequest_UpdatesLastActive(t *testing.T) {
 	http.HandlerFunc(srv.handleTunnelRequest).ServeHTTP(rr, req)
 
 	srv.tunnels.mu.RLock()
-	tunnel := srv.tunnels.tunnels[tunnelID]
+	tunnel = srv.tunnels.tunnels[tunnelID]
 	srv.tunnels.mu.RUnlock()
 
-	assert.True(t, tunnel.LastActive.After(oldTime), "LastActive should be updated after a request")
+	assert.True(t, tunnel.GetLastActive().After(oldTime), "LastActive should be updated after a request")
 }
 
 func TestHandleTunnelRequest_TCPOverHTTP_Returns400(t *testing.T) {
@@ -507,15 +509,16 @@ func TestHandleTunnelRequest_TCPOverHTTP_Returns400(t *testing.T) {
 
 	tunnelID := "tcp-tunnel"
 	srv.tunnels.mu.Lock()
-	srv.tunnels.tunnels[tunnelID] = &Tunnel{
+	tcpTunnel := &Tunnel{
 		ID:         tunnelID,
 		ClientID:   "test-client",
 		Protocol:   "tcp",
 		Subdomain:  "tcptest",
 		TargetPort: 5432,
 		CreateTime: time.Now(),
-		LastActive: time.Now(),
 	}
+	tcpTunnel.SetLastActive(time.Now())
+	srv.tunnels.tunnels[tunnelID] = tcpTunnel
 	srv.tunnels.mu.Unlock()
 
 	// Register a fake WebSocket tunnel so we get to protocol check

@@ -30,8 +30,8 @@ func TestWebSocketManager_RegisterAndGet(t *testing.T) {
 		TunnelID:    "tunnel-1",
 		Connected:   true,
 		ConnectedAt: time.Now(),
-		LastActive:  time.Now(),
 	}
+	wsTunnel.SetLastActive(time.Now())
 
 	mgr.RegisterWebSocketTunnel("tunnel-1", wsTunnel)
 
@@ -350,8 +350,8 @@ func TestTunnelRegistry_AddAndLookup(t *testing.T) {
 		Subdomain:  "myapp",
 		TargetPort: 8080,
 		CreateTime: time.Now(),
-		LastActive: time.Now(),
 	}
+	tunnel.SetLastActive(time.Now())
 
 	registry.mu.Lock()
 	registry.tunnels["t-1"] = tunnel

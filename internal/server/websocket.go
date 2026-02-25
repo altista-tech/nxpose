@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,10 +42,20 @@ type WebSocketTunnel struct {
 	Conn        *websocket.Conn
 	Connected   bool
 	ConnectedAt time.Time
-	LastActive  time.Time
+	lastActive  int64 // Unix nano, use GetLastActive/SetLastActive for atomic access
 	server      *Server
 	closed      bool
 	mu          sync.Mutex
+}
+
+// GetLastActive returns the last active time using atomic load.
+func (t *WebSocketTunnel) GetLastActive() time.Time {
+	return time.Unix(0, atomic.LoadInt64(&t.lastActive))
+}
+
+// SetLastActive sets the last active time using atomic store.
+func (t *WebSocketTunnel) SetLastActive(ts time.Time) {
+	atomic.StoreInt64(&t.lastActive, ts.UnixNano())
 }
 
 // TunnelMessage represents a message sent over the WebSocket tunnel
@@ -145,9 +156,9 @@ func (s *Server) handleWebSocketConnection(ws *websocket.Conn, clientID string) 
 		Conn:        ws,
 		Connected:   true,
 		ConnectedAt: time.Now(),
-		LastActive:  time.Now(),
 		server:      s,
 	}
+	tunnel.SetLastActive(time.Now())
 
 	s.log.WithFields(logrus.Fields{
 		"client_id":     clientID,
@@ -186,7 +197,7 @@ func (t *WebSocketTunnel) handleConnection() {
 			break
 		}
 
-		t.LastActive = time.Now()
+		t.SetLastActive(time.Now())
 
 		// Process the message based on its type
 		t.server.log.WithFields(logrus.Fields{

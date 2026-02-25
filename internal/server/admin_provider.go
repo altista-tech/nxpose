@@ -31,18 +31,19 @@ func (s *Server) GetClients() []admin.ClientInfo {
 		_, connected := s.wsManager.GetWebSocketTunnel(t.ID)
 		ti := toAdminTunnelInfo(t, connected)
 
+		lastActive := t.GetLastActive()
 		if client, ok := clientMap[t.ClientID]; ok {
 			client.TunnelCount++
 			client.Tunnels = append(client.Tunnels, ti)
-			if t.LastActive.After(client.LastActive) {
-				client.LastActive = t.LastActive
+			if lastActive.After(client.LastActive) {
+				client.LastActive = lastActive
 			}
 		} else {
 			clientMap[t.ClientID] = &admin.ClientInfo{
 				ID:          t.ClientID,
 				TunnelCount: 1,
 				Tunnels:     []admin.TunnelInfo{ti},
-				LastActive:  t.LastActive,
+				LastActive:  lastActive,
 			}
 		}
 	}
@@ -60,10 +61,13 @@ func (s *Server) GetStats() admin.ServerStats {
 	tunnelCount := len(s.tunnels.tunnels)
 
 	var totalConns int64
-	clientIDs := make(map[string]bool)
+	connectedClientIDs := make(map[string]bool)
 	for _, t := range s.tunnels.tunnels {
 		totalConns += atomic.LoadInt64(&t.connections)
-		clientIDs[t.ClientID] = true
+		// Only count clients that have at least one active WebSocket tunnel
+		if _, connected := s.wsManager.GetWebSocketTunnel(t.ID); connected {
+			connectedClientIDs[t.ClientID] = true
+		}
 	}
 	s.tunnels.mu.RUnlock()
 
@@ -71,7 +75,7 @@ func (s *Server) GetStats() admin.ServerStats {
 
 	return admin.ServerStats{
 		ActiveTunnels:    tunnelCount,
-		ConnectedClients: len(clientIDs),
+		ConnectedClients: len(connectedClientIDs),
 		TotalConnections: totalConns,
 		Uptime:           uptime,
 		UptimeStr:        admin.FormatDuration(uptime),
@@ -81,22 +85,24 @@ func (s *Server) GetStats() admin.ServerStats {
 
 // KillTunnel removes a tunnel by ID
 func (s *Server) KillTunnel(tunnelID string) error {
+	// Extract tunnel data under lock, then release before external calls
 	s.tunnels.mu.Lock()
-	defer s.tunnels.mu.Unlock()
-
 	tunnel, ok := s.tunnels.tunnels[tunnelID]
 	if !ok {
+		s.tunnels.mu.Unlock()
 		return fmt.Errorf("tunnel %s not found", tunnelID)
 	}
+	clientID := tunnel.ClientID
+	delete(s.tunnels.tunnels, tunnelID)
+	s.tunnels.mu.Unlock()
 
-	// Decrement Redis tunnel count if Redis is enabled
-	if s.redis != nil && tunnel.ClientID != "" {
-		if _, err := s.redis.DecrementTunnelCount(tunnel.ClientID); err != nil {
+	// Perform external operations without holding the tunnel lock
+	if s.redis != nil && clientID != "" {
+		if _, err := s.redis.DecrementTunnelCount(clientID); err != nil {
 			s.log.Warnf("Failed to decrement tunnel count in Redis for killed tunnel: %v", err)
 		}
 	}
 
-	delete(s.tunnels.tunnels, tunnelID)
 	s.wsManager.UnregisterWebSocketTunnel(tunnelID)
 	return nil
 }
@@ -132,7 +138,7 @@ func toAdminTunnelInfo(t *Tunnel, connected bool) admin.TunnelInfo {
 		Subdomain:   t.Subdomain,
 		TargetPort:  t.TargetPort,
 		CreateTime:  t.CreateTime,
-		LastActive:  t.LastActive,
+		LastActive:  t.GetLastActive(),
 		ExpiresAt:   t.ExpiresAt,
 		Connections: atomic.LoadInt64(&t.connections),
 		Connected:   connected,
