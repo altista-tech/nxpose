@@ -216,6 +216,6 @@ Prepare the nxpose tunneling service for open-source release by adding missing c
 
 ### Task 13: Update Documentation
 
-- [ ] Update README.md with test instructions, dev container usage, and admin panel info
-- [ ] Update CLAUDE.md with integration test commands and new file patterns
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update README.md with test instructions, dev container usage, and admin panel info
+- [x] Update CLAUDE.md with integration test commands and new file patterns
+- [x] Move this plan to `docs/plans/completed/`
