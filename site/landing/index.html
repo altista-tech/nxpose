@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NXpose &mdash; Self-Hosted Secure Tunneling</title>
+  <meta name="description" content="Self-hosted tunneling service written in Go. Expose local services to the internet through encrypted tunnels with automatic SSL, OAuth2, and admin panel.">
+  <meta name="keywords" content="nxpose, tunneling, ngrok alternative, self-hosted, secure tunnel, Go, mTLS, TCP tunnel, HTTP tunnel">
+  <meta property="og:title" content="NXpose &mdash; Self-Hosted Secure Tunneling">
+  <meta property="og:description" content="Expose local services to the internet through encrypted tunnels. Single binary, automatic SSL, OAuth2 auth.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nxpose.mpanin.me">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔒</text></svg>">
+  <!-- Yandex.Metrika counter -->
+  <script type="text/javascript">
+      (function(m,e,t,r,i,k,a){
+          m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+          m[i].l=1*new Date();
+          for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+          k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+      })(window, document,'script','https://mc.yandex.ru/metrika/tag.js', 'ym');
+
+      ym(91840855, 'init', {clickmap:true, referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+  </script>
+  <noscript><div><img src="https://mc.yandex.ru/watch/91840855" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+  <!-- /Yandex.Metrika counter -->
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="container header-inner">
+      <a href="/" class="logo">
+        <span class="logo-icon">🔒</span>
+        <span class="logo-text">NXpose</span>
+      </a>
+      <nav class="nav">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#quickstart">Quick Start</a>
+        <a href="docs/">Docs</a>
+        <a href="https://github.com/altista-tech/nxpose" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+          <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">Self-Hosted &middot; Written in Go</div>
+      <h1 class="hero-title">Secure Tunneling<br><span class="hero-accent">to the Internet</span></h1>
+      <p class="hero-desc">
+        Expose local services through encrypted tunnels with automatic SSL, OAuth2 authentication,
+        and a built-in admin panel. HTTP and TCP tunnels &mdash; single binary, cross-platform.
+      </p>
+      <div class="hero-actions">
+        <a href="#install" class="btn btn-primary">Install</a>
+        <a href="https://github.com/altista-tech/nxpose" target="_blank" rel="noopener" class="btn btn-secondary">GitHub</a>
+      </div>
+      <div class="hero-code">
+        <div class="code-header">
+          <span class="code-dot"></span>
+          <span class="code-dot"></span>
+          <span class="code-dot"></span>
+          <span class="code-title">Terminal</span>
+        </div>
+        <pre><code><span class="c-prompt">$</span> <span class="c-cmd">nxpose</span> register
+<span class="c-out">Opening browser for OAuth authentication...</span>
+<span class="c-out">Registration successful! Certificates saved.</span>
+
+<span class="c-prompt">$</span> <span class="c-cmd">nxpose</span> expose http <span class="c-str">3000</span>
+<span class="c-out">Tunnel created successfully!</span>
+<span class="c-out">Public URL: <span class="c-url">https://abc123.tunnel.example.com</span></span>
+<span class="c-out">Forwarding to: http://localhost:3000</span>
+<span class="c-out">Status: Active</span>
+
+<span class="c-prompt">$</span> <span class="c-cmd">nxpose</span> expose tcp <span class="c-str">5432</span>
+<span class="c-out">TCP tunnel created!</span>
+<span class="c-out">Public endpoint: <span class="c-url">tunnel.example.com:15432</span></span>
+<span class="c-out">Forwarding to: localhost:5432</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats Bar -->
+  <section class="stats">
+    <div class="container stats-grid">
+      <div class="stat">
+        <span class="stat-value">2</span>
+        <span class="stat-label">Protocols</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">5</span>
+        <span class="stat-label">Platforms</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">mTLS</span>
+        <span class="stat-label">Security</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">1</span>
+        <span class="stat-label">Binary</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section-title">Why NXpose</h2>
+      <p class="section-desc">A self-hosted ngrok alternative with full control over your infrastructure.</p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🔐</div>
+          <h3>Automatic SSL</h3>
+          <p>Let's Encrypt integration with automatic certificate issuance and renewal for the server and all tunnel subdomains.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🛡️</div>
+          <h3>Mutual TLS</h3>
+          <p>Client certificates for tunnel authentication. Every connection is encrypted end-to-end with mTLS.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🌐</div>
+          <h3>HTTP Tunnels</h3>
+          <p>Unique subdomain routing for each tunnel. Expose web apps, APIs, and webhooks to the internet instantly.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔌</div>
+          <h3>TCP Tunnels</h3>
+          <p>Forward raw TCP connections for databases, SSH, Redis, or any TCP service. Auto port allocation from configurable range.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔑</div>
+          <h3>OAuth2 Auth</h3>
+          <p>GitHub and Google OAuth2 providers. Browser-based registration flow with automatic certificate generation.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>Admin Panel</h3>
+          <p>Built-in HTMX admin panel with live tunnel monitoring, client management, and server status overview.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section id="install" class="section section-alt">
+    <div class="container">
+      <h2 class="section-title">Installation</h2>
+      <p class="section-desc">Install the NXpose client on your machine.</p>
+      <div class="install-grid">
+        <div class="install-card">
+          <h3>macOS (Homebrew)</h3>
+          <div class="code-block">
+            <button class="copy-btn" data-copy="brew install nxrvl/tap/nxpose" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <pre><code>brew install nxrvl/tap/nxpose</code></pre>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>Go Install</h3>
+          <div class="code-block">
+            <button class="copy-btn" data-copy="go install github.com/altista-tech/nxpose/cmd/client@latest" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <pre><code>go install github.com/altista-tech/nxpose/cmd/client@latest</code></pre>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>Linux (Binary)</h3>
+          <div class="code-block">
+            <button class="copy-btn" data-copy="curl -LO https://github.com/altista-tech/nxpose/releases/latest/download/nxpose-linux-amd64
+chmod +x nxpose-linux-amd64
+sudo mv nxpose-linux-amd64 /usr/local/bin/nxpose" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <pre><code>curl -LO https://github.com/altista-tech/nxpose/releases/latest/download/nxpose-linux-amd64
+chmod +x nxpose-linux-amd64
+sudo mv nxpose-linux-amd64 /usr/local/bin/nxpose</code></pre>
+          </div>
+        </div>
+        <div class="install-card">
+          <h3>macOS (Binary)</h3>
+          <div class="code-block">
+            <button class="copy-btn" data-copy="curl -LO https://github.com/altista-tech/nxpose/releases/latest/download/nxpose-darwin-arm64
+chmod +x nxpose-darwin-arm64
+sudo mv nxpose-darwin-arm64 /usr/local/bin/nxpose" aria-label="Copy">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <pre><code>curl -LO https://github.com/altista-tech/nxpose/releases/latest/download/nxpose-darwin-arm64
+chmod +x nxpose-darwin-arm64
+sudo mv nxpose-darwin-arm64 /usr/local/bin/nxpose</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quick Start -->
+  <section id="quickstart" class="section">
+    <div class="container">
+      <h2 class="section-title">Quick Start</h2>
+      <p class="section-desc">Three commands to expose your local service to the internet.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h3>Register with a server</h3>
+            <p>Authenticate via OAuth and receive client certificates automatically.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-copy="nxpose register" aria-label="Copy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+              <pre><code>nxpose register</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h3>Expose an HTTP service</h3>
+            <p>Get a public URL for your local web app or API.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-copy="nxpose expose http 3000" aria-label="Copy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+              <pre><code>nxpose expose http 3000</code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h3>Or expose a TCP service</h3>
+            <p>Forward databases, SSH, or any TCP service through the tunnel.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-copy="nxpose expose tcp 5432" aria-label="Copy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+              <pre><code>nxpose expose tcp 5432</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-left">&copy; 2026 Maksim Panin</div>
+      <div class="footer-right">
+        <a href="docs/">Documentation</a>
+        <a href="docs/server/">Server Guide</a>
+        <a href="https://github.com/altista-tech/nxpose" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Theme toggle
+    const toggle = document.getElementById('themeToggle');
+    const html = document.documentElement;
+    const saved = localStorage.getItem('theme');
+    if (saved) html.setAttribute('data-theme', saved);
+
+    toggle.addEventListener('click', () => {
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    });
+
+    // Copy buttons
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const text = btn.getAttribute('data-copy');
+        await navigator.clipboard.writeText(text);
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      });
+    });
+  </script>
+
+</body>
+</html>

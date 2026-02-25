@@ -1,5 +1,5 @@
 site_name: NXpose
-site_url: https://nxpose.mpanin.me/
+site_url: https://nxpose.mpanin.me/docs/
 site_author: Maksim Panin
 site_description: >-
   NXpose is a self-hosted tunneling service written in Go that exposes local
