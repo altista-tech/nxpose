@@ -50,6 +50,12 @@ type ManagedTunnel struct {
 	tunnel        *Tunnel
 	reconnectChan chan struct{}
 	stopChan      chan struct{}
+	stopOnce      sync.Once
+}
+
+// stop safely closes the stopChan, ensuring it is only closed once
+func (mt *ManagedTunnel) stop() {
+	mt.stopOnce.Do(func() { close(mt.stopChan) })
 }
 
 // TunnelInfo provides public information about a managed tunnel
@@ -284,7 +290,7 @@ func (tm *TunnelManager) cleanupStaleTunnels() {
 
 			// Close the tunnel if it's active
 			if tunnel.Active {
-				close(tunnel.stopChan)
+				tunnel.stop()
 				if tunnel.tunnel != nil {
 					_ = tunnel.tunnel.Stop()
 				}
@@ -555,7 +561,7 @@ func (tm *TunnelManager) RemoveTunnel(id string) bool {
 
 	// Close the tunnel if it's active
 	if tunnel.Active {
-		close(tunnel.stopChan)
+		tunnel.stop()
 		if tunnel.tunnel != nil {
 			_ = tunnel.tunnel.Stop()
 		}
@@ -842,7 +848,7 @@ func (tm *TunnelManager) Close() error {
 	// Stop all tunnels
 	for id, tunnel := range tunnelsCopy {
 		tm.log.Infof("Stopping tunnel %s", id)
-		close(tunnel.stopChan)
+		tunnel.stop()
 		tm.mu.RLock()
 		t := tunnel.tunnel
 		tm.mu.RUnlock()

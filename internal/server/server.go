@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -408,9 +409,9 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update last active timestamp
+	// Update last active timestamp and connection count atomically
 	tunnel.LastActive = time.Now()
-	tunnel.connections++
+	atomic.AddInt64(&tunnel.connections, 1)
 
 	// Determine if request is HTTP or HTTPS based on TLS connection
 	isSecure := r.TLS != nil
@@ -1063,6 +1064,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 // handleTunnel handles tunnel creation requests
 func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
+	// Reject new tunnel creation when in maintenance mode
+	if s.GetMaintenanceMode() {
+		http.Error(w, "Server is in maintenance mode", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Only accept POST requests
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

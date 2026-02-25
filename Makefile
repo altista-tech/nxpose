@@ -16,6 +16,11 @@ CLIENT_BINARY_NAME := nxpose
 # Client binary output directory
 DIST_DIR := dist
 
+# Client build variables (for build-client target)
+CLIENT_GOOS ?= $(shell go env GOOS)
+CLIENT_GOARCH ?= $(shell go env GOARCH)
+CLIENT_EXT ?=
+
 # Detect operating system and architecture
 OS := $(shell uname -s)
 HOST_ARCH := $(shell uname -m)

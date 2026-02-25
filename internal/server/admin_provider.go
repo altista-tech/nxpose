@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"nxpose/internal/admin"
@@ -61,7 +62,7 @@ func (s *Server) GetStats() admin.ServerStats {
 	var totalConns int64
 	clientIDs := make(map[string]bool)
 	for _, t := range s.tunnels.tunnels {
-		totalConns += t.connections
+		totalConns += atomic.LoadInt64(&t.connections)
 		clientIDs[t.ClientID] = true
 	}
 	s.tunnels.mu.RUnlock()
@@ -133,7 +134,7 @@ func toAdminTunnelInfo(t *Tunnel, connected bool) admin.TunnelInfo {
 		CreateTime:  t.CreateTime,
 		LastActive:  t.LastActive,
 		ExpiresAt:   t.ExpiresAt,
-		Connections: t.connections,
+		Connections: atomic.LoadInt64(&t.connections),
 		Connected:   connected,
 	}
 }

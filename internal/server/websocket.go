@@ -78,11 +78,16 @@ func (m *WebSocketManager) RegisterWebSocketTunnel(tunnelID string, wsTunnel *We
 	m.tunnels[tunnelID] = wsTunnel
 }
 
-// UnregisterWebSocketTunnel removes a WebSocket tunnel from the manager
+// UnregisterWebSocketTunnel removes a WebSocket tunnel from the manager and closes its connection
 func (m *WebSocketManager) UnregisterWebSocketTunnel(tunnelID string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	wsTunnel, exists := m.tunnels[tunnelID]
 	delete(m.tunnels, tunnelID)
+	m.mu.Unlock()
+
+	if exists && wsTunnel != nil && wsTunnel.Conn != nil {
+		wsTunnel.Conn.Close()
+	}
 }
 
 // GetWebSocketTunnel gets a WebSocket tunnel by tunnel ID
