@@ -1045,6 +1045,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Legacy registration logic (for backward compatibility)
+	// Limit request body size to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(w, r.Body, 1*1024*1024) // 1MB
+
 	// Parse the JSON request body
 	var request RegistrationRequest
 	err := json.NewDecoder(r.Body).Decode(&request)
@@ -1097,6 +1100,9 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Limit request body size to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(w, r.Body, 1*1024*1024) // 1MB
 
 	// Parse request body
 	var reqBody TunnelRequest
@@ -1184,10 +1190,16 @@ func (s *Server) handleTunnel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create tunnel
+	// Create tunnel - use userID (which may be OAuth user_id or reqBody.ClientID)
+	// as the ClientID so Redis increment/decrement keys are consistent
+	tunnelClientID := reqBody.ClientID
+	if userID != "" {
+		tunnelClientID = userID
+	}
+
 	tunnel := &Tunnel{
 		ID:         tunnelID,
-		ClientID:   reqBody.ClientID,
+		ClientID:   tunnelClientID,
 		Protocol:   reqBody.Protocol,
 		Subdomain:  subdomain,
 		TargetPort: reqBody.Port,

@@ -488,7 +488,7 @@ func TestBasicAuthCorrectCredentials(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Dashboard")
 }
 
-// TestBasicAuthEmptyPassword tests that empty password rejects requests
+// TestBasicAuthEmptyPassword tests that empty password is rejected at startup
 func TestBasicAuthEmptyPassword(t *testing.T) {
 	provider := newMockProvider()
 	adminConfig := &config.AdminConfig{
@@ -496,7 +496,7 @@ func TestBasicAuthEmptyPassword(t *testing.T) {
 		PathPrefix: "/admin",
 		AuthMethod: "basic",
 		Username:   "admin",
-		Password:   "", // empty password = misconfigured, should reject
+		Password:   "", // empty password = misconfigured, should reject at init
 	}
 	serverConfig := &config.ServerConfig{
 		BindAddress: "0.0.0.0",
@@ -504,18 +504,9 @@ func TestBasicAuthEmptyPassword(t *testing.T) {
 		BaseDomain:  "example.com",
 	}
 
-	handler, err := NewHandler(adminConfig, serverConfig, provider)
-	require.NoError(t, err)
-
-	router := mux.NewRouter()
-	handler.RegisterRoutes(router)
-
-	req := httptest.NewRequest("GET", "/admin/", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "basic auth requires username and password")
+	_, err := NewHandler(adminConfig, serverConfig, provider)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "basic auth requires both username and password")
 }
 
 // TestNoAuthMethod tests "none" auth method allows all access

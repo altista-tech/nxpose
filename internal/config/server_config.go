@@ -364,7 +364,7 @@ func LoadServerConfig(configFile string) (*ServerConfig, error) {
 		} else {
 			fmt.Printf("ERROR: Failed to unmarshal OAuth2 providers: %v\n", err)
 		}
-	} else {
+	} else if viper.GetBool("verbose") {
 		fmt.Printf("DEBUG: oauth2.providers not set in configuration\n")
 	}
 

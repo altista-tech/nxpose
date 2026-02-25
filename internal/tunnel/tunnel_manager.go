@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -186,71 +185,35 @@ func (tm *TunnelManager) cleanupRoutine() {
 	}
 }
 
-// reconnectRoutine attempts to reconnect failed tunnels
+// reconnectRoutine periodically checks for inactive tunnels that need reconnection.
+// Uses a ticker instead of per-iteration goroutines to avoid goroutine leaks.
 func (tm *TunnelManager) reconnectRoutine() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-tm.ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 			// Check for tunnels needing reconnection
 			tm.mu.RLock()
-			var reconnectChans []chan struct{}
-			for _, tunnel := range tm.tunnels {
-				if tunnel.Active {
-					continue
+			var needsReconnect []string
+			for id, tunnel := range tm.tunnels {
+				if !tunnel.Active {
+					// Check if reconnect was signaled (non-blocking)
+					select {
+					case <-tunnel.reconnectChan:
+						needsReconnect = append(needsReconnect, id)
+					default:
+					}
 				}
-				reconnectChans = append(reconnectChans, tunnel.reconnectChan)
 			}
 			tm.mu.RUnlock()
 
-			// Wait for a reconnect signal or context cancellation
-			if len(reconnectChans) == 0 {
-				// If no tunnels need reconnection, sleep briefly
-				select {
-				case <-tm.ctx.Done():
-					return
-				case <-time.After(5 * time.Second):
-					continue
-				}
-			}
-
-			// Create a select case for each reconnect channel
-			cases := make([]chan struct{}, len(reconnectChans)+1)
-			cases[0] = make(chan struct{})
-
-			// Add context done channel
-			go func() {
-				<-tm.ctx.Done()
-				close(cases[0])
-			}()
-
-			// Add reconnect channels
-			for i, ch := range reconnectChans {
-				cases[i+1] = ch
-			}
-
-			// Wait for any signal
-			var triggered bool
-			for i, ch := range cases {
-				select {
-				case <-ch:
-					triggered = true
-					if i == 0 {
-						return // context cancelled
-					}
-					// Otherwise, a tunnel needs reconnection
-					break
-				default:
-				}
-				if triggered {
-					break
-				}
-			}
-
-			// If no signal, sleep briefly
-			if !triggered {
-				time.Sleep(1 * time.Second)
+			// Log reconnection needs (actual reconnection handled by startTunnel)
+			for _, id := range needsReconnect {
+				tm.log.Infof("Tunnel %s needs reconnection", id)
 			}
 		}
 	}
@@ -669,39 +632,53 @@ func (tm *TunnelManager) SaveTunnels() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Get tunnels to save
-	tm.mu.RLock()
-	tunnelData := TunnelSaveData{
-		Tunnels: make([]ManagedTunnelData, 0, len(tm.tunnels)),
+	// Collect tunnel data under the lock, then write files outside it
+	type tunnelSnapshot struct {
+		data     ManagedTunnelData
+		certData []byte
 	}
 
+	tm.mu.RLock()
+	snapshots := make([]tunnelSnapshot, 0, len(tm.tunnels))
 	for _, tunnel := range tm.tunnels {
-		// Save certificate to disk if needed
-		certPath := ""
-		if len(tunnel.CertData) > 0 {
-			certPath = filepath.Join(tm.configDir, fmt.Sprintf("cert_%s.pem", tunnel.ID))
-			if err := ioutil.WriteFile(certPath, tunnel.CertData, 0600); err != nil {
-				tm.log.Warnf("Failed to save certificate for tunnel %s: %v", tunnel.ID, err)
-				certPath = ""
-			}
+		snap := tunnelSnapshot{
+			data: ManagedTunnelData{
+				ID:         tunnel.ID,
+				UserID:     tunnel.UserID,
+				Protocol:   tunnel.Protocol,
+				LocalPort:  tunnel.LocalPort,
+				PublicURL:  tunnel.PublicURL,
+				ServerHost: tunnel.ServerHost,
+				ServerPort: tunnel.ServerPort,
+				Created:    tunnel.Created,
+				LastActive: tunnel.LastActive,
+				ExpiresAt:  tunnel.ExpiresAt,
+			},
 		}
-
-		// Add tunnel data
-		tunnelData.Tunnels = append(tunnelData.Tunnels, ManagedTunnelData{
-			ID:         tunnel.ID,
-			UserID:     tunnel.UserID,
-			Protocol:   tunnel.Protocol,
-			LocalPort:  tunnel.LocalPort,
-			PublicURL:  tunnel.PublicURL,
-			ServerHost: tunnel.ServerHost,
-			ServerPort: tunnel.ServerPort,
-			Created:    tunnel.Created,
-			LastActive: tunnel.LastActive,
-			ExpiresAt:  tunnel.ExpiresAt,
-			CertPath:   certPath,
-		})
+		if len(tunnel.CertData) > 0 {
+			snap.certData = make([]byte, len(tunnel.CertData))
+			copy(snap.certData, tunnel.CertData)
+		}
+		snapshots = append(snapshots, snap)
 	}
 	tm.mu.RUnlock()
+
+	// Write certificate files outside the lock
+	tunnelData := TunnelSaveData{
+		Tunnels: make([]ManagedTunnelData, 0, len(snapshots)),
+	}
+	for _, snap := range snapshots {
+		td := snap.data
+		if len(snap.certData) > 0 {
+			certPath := filepath.Join(tm.configDir, fmt.Sprintf("cert_%s.pem", td.ID))
+			if err := os.WriteFile(certPath, snap.certData, 0600); err != nil {
+				tm.log.Warnf("Failed to save certificate for tunnel %s: %v", td.ID, err)
+			} else {
+				td.CertPath = certPath
+			}
+		}
+		tunnelData.Tunnels = append(tunnelData.Tunnels, td)
+	}
 
 	// Marshal to JSON
 	configPath := filepath.Join(tm.configDir, "tunnels.json")
@@ -711,7 +688,7 @@ func (tm *TunnelManager) SaveTunnels() error {
 	}
 
 	// Write to file
-	if err := ioutil.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write tunnel data: %w", err)
 	}
 
@@ -732,7 +709,7 @@ func (tm *TunnelManager) LoadTunnels() error {
 	}
 
 	// Read configuration file
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to read tunnel data: %w", err)
 	}
@@ -749,7 +726,7 @@ func (tm *TunnelManager) LoadTunnels() error {
 		var certData []byte
 		if td.CertPath != "" {
 			var err error
-			certData, err = ioutil.ReadFile(td.CertPath)
+			certData, err = os.ReadFile(td.CertPath)
 			if err != nil {
 				tm.log.Warnf("Failed to load certificate for tunnel %s: %v", td.ID, err)
 			}

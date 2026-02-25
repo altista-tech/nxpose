@@ -373,11 +373,11 @@ func (t *WebSocketTunnel) sendHTTPRequest(request *http.Request) (*HTTPResponse,
 		}
 	}
 
-	// Read request body
+	// Read request body with size limit to prevent memory exhaustion
 	var body []byte
 	if request.Body != nil {
 		var err error
-		body, err = io.ReadAll(request.Body)
+		body, err = io.ReadAll(io.LimitReader(request.Body, 10*1024*1024)) // 10MB limit
 		if err != nil {
 			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}

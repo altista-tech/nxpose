@@ -76,6 +76,11 @@ func NewHandler(adminConfig *config.AdminConfig, serverConfig *config.ServerConf
 		adminConfig.PathPrefix = "/admin"
 	}
 
+	// Validate auth configuration at startup rather than failing at request time
+	if adminConfig.AuthMethod == "basic" && (adminConfig.Username == "" || adminConfig.Password == "") {
+		return nil, fmt.Errorf("admin panel basic auth requires both username and password to be configured")
+	}
+
 	h := &Handler{
 		config:       adminConfig,
 		serverConfig: serverConfig,
