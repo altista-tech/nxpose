@@ -80,6 +80,15 @@ func (s *Server) cleanupInactiveTunnels() {
 	if len(tunnelsToRemove) > 0 {
 		s.tunnels.mu.Lock()
 		for _, id := range tunnelsToRemove {
+			tunnel := s.tunnels.tunnels[id]
+
+			// Decrement Redis tunnel count if applicable
+			if s.redis != nil && tunnel != nil && tunnel.ClientID != "" {
+				if _, err := s.redis.DecrementTunnelCount(tunnel.ClientID); err != nil {
+					s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+				}
+			}
+
 			delete(s.tunnels.tunnels, id)
 
 			// Also remove from WebSocket manager if present

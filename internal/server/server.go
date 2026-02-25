@@ -1367,22 +1367,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-// Add the CloseAll method to WebSocketManager
+// CloseAll closes all WebSocket tunnels and clears the manager state.
+// Tunnels are collected under the lock and closed outside it to avoid
+// deadlocks with handleConnection which holds the tunnel lock first.
 func (m *WebSocketManager) CloseAll() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	// Close all WebSocket tunnels
+	// Collect tunnels and clear the map under the lock
+	tunnels := make([]*WebSocketTunnel, 0, len(m.tunnels))
 	for _, tunnel := range m.tunnels {
-		tunnel.Close()
+		tunnels = append(tunnels, tunnel)
 	}
-
-	// Clear the tunnels map
 	m.tunnels = make(map[string]*WebSocketTunnel)
 
 	// Clear the requests map and close all waiting channels
 	for id, ch := range m.requests {
 		close(ch)
 		delete(m.requests, id)
+	}
+	m.mu.Unlock()
+
+	// Close tunnels outside the lock to avoid ABBA deadlock
+	for _, tunnel := range tunnels {
+		tunnel.Close()
 	}
 }

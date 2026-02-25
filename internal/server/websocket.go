@@ -285,34 +285,23 @@ func (t *WebSocketTunnel) handleRegisterTunnel(message TunnelMessage) {
 		return
 	}
 
-	// For testing/debugging, allow registration regardless of client ID
-	// In production, verify client ID matches
-	/*
-	   if tunnel.ClientID != t.ClientID {
-	       // Send error response
-	       errorResponse := TunnelMessage{
-	           Type:      "error",
-	           RequestID: message.RequestID,
-	           Data:      json.RawMessage([]byte(`{"message":"Unauthorized"}`)),
-	       }
-	       t.sendMessage(errorResponse)
+	// Verify client ID matches the tunnel owner
+	if tunnel.ClientID != t.ClientID {
+		errorResponse := TunnelMessage{
+			Type:      "error",
+			RequestID: message.RequestID,
+			Data:      json.RawMessage([]byte(`{"message":"Unauthorized"}`)),
+		}
+		t.sendMessage(errorResponse)
 
-	       t.server.log.WithFields(logrus.Fields{
-	           "connection_id": t.ID,
-	           "tunnel_id":     data.TunnelID,
-	           "client_id":     t.ClientID,
-	           "expected_id":   tunnel.ClientID,
-	       }).Error("Tunnel registration failed: client ID mismatch")
-	       return
-	   }
-	*/
-	t.server.log.WithFields(logrus.Fields{
-		"connection_id":    t.ID,
-		"tunnel_id":        data.TunnelID,
-		"client_id":        t.ClientID,
-		"tunnel_client_id": tunnel.ClientID,
-		"skipping_check":   true,
-	}).Debug("Bypassing client ID verification for testing")
+		t.server.log.WithFields(logrus.Fields{
+			"connection_id": t.ID,
+			"tunnel_id":     data.TunnelID,
+			"client_id":     t.ClientID,
+			"expected_id":   tunnel.ClientID,
+		}).Error("Tunnel registration failed: client ID mismatch")
+		return
+	}
 
 	// Register this WebSocket connection with the tunnel
 	t.TunnelID = data.TunnelID
