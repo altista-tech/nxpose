@@ -433,6 +433,9 @@ func (t *WebSocketTunnel) sendHTTPRequest(request *http.Request) (*HTTPResponse,
 	// Wait for response with timeout
 	select {
 	case response := <-responseChan:
+		if response == nil {
+			return nil, fmt.Errorf("request cancelled: tunnel shutting down")
+		}
 		return response, nil
 	case <-time.After(30 * time.Second):
 		return nil, fmt.Errorf("timeout waiting for response")

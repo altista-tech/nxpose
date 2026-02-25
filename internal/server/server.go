@@ -688,9 +688,14 @@ func (s *Server) startTunnelCleanupRoutine() {
 func (s *Server) cleanupExpiredTunnels() {
 	now := time.Now()
 
-	s.tunnels.mu.Lock()
-	defer s.tunnels.mu.Unlock()
+	// Collect expired tunnels under the lock, then release before I/O
+	type expiredTunnel struct {
+		id       string
+		clientID string
+	}
+	var expired []expiredTunnel
 
+	s.tunnels.mu.Lock()
 	for id, tunnel := range s.tunnels.tunnels {
 		// Skip tunnels without expiration
 		if tunnel.ExpiresAt.IsZero() {
@@ -700,18 +705,25 @@ func (s *Server) cleanupExpiredTunnels() {
 		// Check if tunnel is expired
 		if now.After(tunnel.ExpiresAt) {
 			s.log.Infof("Removing expired tunnel %s", id)
-
-			// If Redis is enabled, decrement user's tunnel count
-			if s.redis != nil && tunnel.ClientID != "" {
-				_, err := s.redis.DecrementTunnelCount(tunnel.ClientID)
-				if err != nil {
-					s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
-				}
+			clientID := ""
+			if tunnel.ClientID != "" {
+				clientID = tunnel.ClientID
 			}
-
-			// Remove tunnel
+			expired = append(expired, expiredTunnel{id: id, clientID: clientID})
 			delete(s.tunnels.tunnels, id)
 		}
+	}
+	s.tunnels.mu.Unlock()
+
+	// Perform Redis I/O and WebSocket cleanup outside the lock
+	for _, et := range expired {
+		if s.redis != nil && et.clientID != "" {
+			_, err := s.redis.DecrementTunnelCount(et.clientID)
+			if err != nil {
+				s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+			}
+		}
+		s.wsManager.UnregisterWebSocketTunnel(et.id)
 	}
 }
 

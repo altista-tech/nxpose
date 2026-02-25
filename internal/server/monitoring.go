@@ -78,25 +78,41 @@ func (s *Server) cleanupInactiveTunnels() {
 
 	// Remove the tunnels
 	if len(tunnelsToRemove) > 0 {
+		// Collect client IDs under the lock, delete from map, then release
+		// before Redis I/O and WebSocket close to avoid holding the lock
+		// during network operations.
+		type removedTunnel struct {
+			id       string
+			clientID string
+		}
+		var removed []removedTunnel
+
 		s.tunnels.mu.Lock()
 		for _, id := range tunnelsToRemove {
-			tunnel := s.tunnels.tunnels[id]
-
-			// Decrement Redis tunnel count if applicable
-			if s.redis != nil && tunnel != nil && tunnel.ClientID != "" {
-				if _, err := s.redis.DecrementTunnelCount(tunnel.ClientID); err != nil {
-					s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
-				}
+			tunnel, exists := s.tunnels.tunnels[id]
+			if !exists {
+				continue // Already removed by another goroutine
 			}
-
+			clientID := ""
+			if tunnel.ClientID != "" {
+				clientID = tunnel.ClientID
+			}
+			removed = append(removed, removedTunnel{id: id, clientID: clientID})
 			delete(s.tunnels.tunnels, id)
-
-			// Also remove from WebSocket manager if present
-			s.wsManager.UnregisterWebSocketTunnel(id)
 		}
 		s.tunnels.mu.Unlock()
 
-		s.log.WithField("count", len(tunnelsToRemove)).Info("Removed inactive tunnels")
+		// Perform I/O operations outside the lock
+		for _, rt := range removed {
+			if s.redis != nil && rt.clientID != "" {
+				if _, err := s.redis.DecrementTunnelCount(rt.clientID); err != nil {
+					s.log.Warnf("Failed to decrement tunnel count in Redis: %v", err)
+				}
+			}
+			s.wsManager.UnregisterWebSocketTunnel(rt.id)
+		}
+
+		s.log.WithField("count", len(removed)).Info("Removed inactive tunnels")
 	}
 }
 
