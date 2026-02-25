@@ -2,16 +2,9 @@ package server
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"nxpose/internal/admin"
-)
-
-// maintenanceState tracks whether the server is in maintenance mode
-var (
-	maintenanceMode bool
-	maintenanceMu   sync.RWMutex
 )
 
 // GetTunnels returns all active tunnels for the admin panel
@@ -22,18 +15,7 @@ func (s *Server) GetTunnels() []admin.TunnelInfo {
 	tunnels := make([]admin.TunnelInfo, 0, len(s.tunnels.tunnels))
 	for _, t := range s.tunnels.tunnels {
 		_, connected := s.wsManager.GetWebSocketTunnel(t.ID)
-		tunnels = append(tunnels, admin.TunnelInfo{
-			ID:          t.ID,
-			ClientID:    t.ClientID,
-			Protocol:    t.Protocol,
-			Subdomain:   t.Subdomain,
-			TargetPort:  t.TargetPort,
-			CreateTime:  t.CreateTime,
-			LastActive:  t.LastActive,
-			ExpiresAt:   t.ExpiresAt,
-			Connections: t.connections,
-			Connected:   connected,
-		})
+		tunnels = append(tunnels, toAdminTunnelInfo(t, connected))
 	}
 	return tunnels
 }
@@ -46,18 +28,7 @@ func (s *Server) GetClients() []admin.ClientInfo {
 	clientMap := make(map[string]*admin.ClientInfo)
 	for _, t := range s.tunnels.tunnels {
 		_, connected := s.wsManager.GetWebSocketTunnel(t.ID)
-		ti := admin.TunnelInfo{
-			ID:          t.ID,
-			ClientID:    t.ClientID,
-			Protocol:    t.Protocol,
-			Subdomain:   t.Subdomain,
-			TargetPort:  t.TargetPort,
-			CreateTime:  t.CreateTime,
-			LastActive:  t.LastActive,
-			ExpiresAt:   t.ExpiresAt,
-			Connections: t.connections,
-			Connected:   connected,
-		}
+		ti := toAdminTunnelInfo(t, connected)
 
 		if client, ok := clientMap[t.ClientID]; ok {
 			client.TunnelCount++
@@ -112,8 +83,16 @@ func (s *Server) KillTunnel(tunnelID string) error {
 	s.tunnels.mu.Lock()
 	defer s.tunnels.mu.Unlock()
 
-	if _, ok := s.tunnels.tunnels[tunnelID]; !ok {
+	tunnel, ok := s.tunnels.tunnels[tunnelID]
+	if !ok {
 		return fmt.Errorf("tunnel %s not found", tunnelID)
+	}
+
+	// Decrement Redis tunnel count if Redis is enabled
+	if s.redis != nil && tunnel.ClientID != "" {
+		if _, err := s.redis.DecrementTunnelCount(tunnel.ClientID); err != nil {
+			s.log.Warnf("Failed to decrement tunnel count in Redis for killed tunnel: %v", err)
+		}
 	}
 
 	delete(s.tunnels.tunnels, tunnelID)
@@ -123,14 +102,38 @@ func (s *Server) KillTunnel(tunnelID string) error {
 
 // GetMaintenanceMode returns the current maintenance mode state
 func (s *Server) GetMaintenanceMode() bool {
-	maintenanceMu.RLock()
-	defer maintenanceMu.RUnlock()
-	return maintenanceMode
+	s.maintenanceMu.RLock()
+	defer s.maintenanceMu.RUnlock()
+	return s.maintenanceMode
 }
 
 // SetMaintenanceMode sets the maintenance mode state
 func (s *Server) SetMaintenanceMode(enabled bool) {
-	maintenanceMu.Lock()
-	defer maintenanceMu.Unlock()
-	maintenanceMode = enabled
+	s.maintenanceMu.Lock()
+	defer s.maintenanceMu.Unlock()
+	s.maintenanceMode = enabled
+}
+
+// ToggleMaintenanceMode atomically toggles maintenance mode and returns the new state
+func (s *Server) ToggleMaintenanceMode() bool {
+	s.maintenanceMu.Lock()
+	defer s.maintenanceMu.Unlock()
+	s.maintenanceMode = !s.maintenanceMode
+	return s.maintenanceMode
+}
+
+// toAdminTunnelInfo converts a server Tunnel to an admin TunnelInfo
+func toAdminTunnelInfo(t *Tunnel, connected bool) admin.TunnelInfo {
+	return admin.TunnelInfo{
+		ID:          t.ID,
+		ClientID:    t.ClientID,
+		Protocol:    t.Protocol,
+		Subdomain:   t.Subdomain,
+		TargetPort:  t.TargetPort,
+		CreateTime:  t.CreateTime,
+		LastActive:  t.LastActive,
+		ExpiresAt:   t.ExpiresAt,
+		Connections: t.connections,
+		Connected:   connected,
+	}
 }

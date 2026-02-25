@@ -26,9 +26,21 @@ make build
 # Run tests
 go test ./...
 
+# Run integration tests (requires Docker)
+make test-integration
+
 # Run linting
 go vet ./...
+staticcheck ./...
 ```
+
+### Using the Dev Container
+
+The project includes a VS Code dev container with all dependencies pre-configured:
+
+1. Open the project in VS Code
+2. Click "Reopen in Container" when prompted
+3. The container includes Go 1.24, Docker-in-Docker, MongoDB, and Redis
 
 ### Building
 
@@ -69,10 +81,11 @@ make build
    ```
 2. Make your changes, following the code style guide below.
 3. Add tests for new functionality.
-4. Ensure all tests pass:
+4. Ensure all tests and linting pass:
    ```bash
    go test ./...
    go vet ./...
+   staticcheck ./...
    ```
 5. Format your code:
    ```bash
@@ -107,6 +120,14 @@ make build
 - Run the full test suite before submitting a PR:
   ```bash
   go test ./...
+  ```
+- Run integration tests (requires Docker):
+  ```bash
+  make test-integration
+  ```
+- Run all tests (unit + integration):
+  ```bash
+  make test-all
   ```
 
 ## Code of Conduct

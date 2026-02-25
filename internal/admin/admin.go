@@ -1,12 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -54,6 +54,7 @@ type DataProvider interface {
 	KillTunnel(tunnelID string) error
 	GetMaintenanceMode() bool
 	SetMaintenanceMode(enabled bool)
+	ToggleMaintenanceMode() bool
 }
 
 // Handler implements the admin panel HTTP handlers
@@ -63,7 +64,6 @@ type Handler struct {
 	provider     DataProvider
 	templates    *template.Template
 	startTime    time.Time
-	mu           sync.RWMutex
 }
 
 // NewHandler creates a new admin panel handler
@@ -117,12 +117,12 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch h.config.AuthMethod {
-		case "none":
+		case "none", "":
 			next.ServeHTTP(w, r)
 			return
 		case "basic":
 			if h.config.Username == "" || h.config.Password == "" {
-				next.ServeHTTP(w, r)
+				http.Error(w, "Admin panel misconfigured: basic auth requires username and password", http.StatusInternalServerError)
 				return
 			}
 			user, pass, ok := r.BasicAuth()
@@ -135,8 +135,8 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 		default:
-			// Default to no auth if unrecognized method
-			next.ServeHTTP(w, r)
+			http.Error(w, "Server misconfiguration: unknown admin auth method", http.StatusInternalServerError)
+			return
 		}
 	})
 }
@@ -268,12 +268,11 @@ func (h *Handler) handleAPIClients(w http.ResponseWriter, r *http.Request) {
 
 // handleAPIToggleMaintenance toggles maintenance mode
 func (h *Handler) handleAPIToggleMaintenance(w http.ResponseWriter, r *http.Request) {
-	current := h.provider.GetMaintenanceMode()
-	h.provider.SetMaintenanceMode(!current)
+	newState := h.provider.ToggleMaintenanceMode()
 
 	if r.Header.Get("HX-Request") == "true" {
 		data := map[string]interface{}{
-			"MaintenanceMode": !current,
+			"MaintenanceMode": newState,
 			"PathPrefix":      h.config.PathPrefix,
 		}
 		h.renderTemplate(w, "maintenance_fragment", data)
@@ -281,7 +280,7 @@ func (h *Handler) handleAPIToggleMaintenance(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"maintenance_mode": !current})
+	json.NewEncoder(w).Encode(map[string]bool{"maintenance_mode": newState})
 }
 
 // handleCSS serves the admin CSS
@@ -298,10 +297,13 @@ func (h *Handler) handleJS(w http.ResponseWriter, r *http.Request) {
 
 // renderTemplate renders a named template with the given data
 func (h *Handler) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.templates.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := h.templates.ExecuteTemplate(&buf, name, data); err != nil {
 		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	buf.WriteTo(w)
 }
 
 // FormatDuration formats a duration into a human-readable string

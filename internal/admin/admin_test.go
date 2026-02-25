@@ -123,6 +123,13 @@ func (m *mockProvider) SetMaintenanceMode(enabled bool) {
 	m.maintenanceMode = enabled
 }
 
+func (m *mockProvider) ToggleMaintenanceMode() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maintenanceMode = !m.maintenanceMode
+	return m.maintenanceMode
+}
+
 func setupTestHandler(t *testing.T) (*Handler, *mux.Router, *mockProvider) {
 	t.Helper()
 
@@ -480,7 +487,7 @@ func TestBasicAuthCorrectCredentials(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "Dashboard")
 }
 
-// TestBasicAuthEmptyPassword tests that empty password skips auth
+// TestBasicAuthEmptyPassword tests that empty password rejects requests
 func TestBasicAuthEmptyPassword(t *testing.T) {
 	provider := newMockProvider()
 	adminConfig := &config.AdminConfig{
@@ -488,7 +495,7 @@ func TestBasicAuthEmptyPassword(t *testing.T) {
 		PathPrefix: "/admin",
 		AuthMethod: "basic",
 		Username:   "admin",
-		Password:   "", // empty password = auth disabled
+		Password:   "", // empty password = misconfigured, should reject
 	}
 	serverConfig := &config.ServerConfig{
 		BindAddress: "0.0.0.0",
@@ -506,7 +513,8 @@ func TestBasicAuthEmptyPassword(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "basic auth requires username and password")
 }
 
 // TestNoAuthMethod tests "none" auth method allows all access

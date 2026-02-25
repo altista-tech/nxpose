@@ -66,10 +66,13 @@ type Server struct {
 	redis        *RedisClient
 	authService  *OAuthService
 
-	mu         sync.Mutex
-	stopping   bool
-	shutdownCh chan struct{}
-	startTime  time.Time
+	mu              sync.Mutex
+	stopping        bool
+	shutdownCh      chan struct{}
+	startTime       time.Time
+	routesOnce      sync.Once
+	maintenanceMode bool
+	maintenanceMu   sync.RWMutex
 }
 
 // NewServer creates a new server instance
@@ -895,23 +898,25 @@ func (s *Server) Handler() http.Handler {
 
 // setupRoutes registers all API and tunnel routes on the router.
 func (s *Server) setupRoutes() {
-	s.router.HandleFunc("/api/register", s.handleRegister)
-	s.router.HandleFunc("/api/tunnel", s.handleTunnel)
-	s.router.HandleFunc("/api/ws", s.handleWebSocket)
-	s.router.HandleFunc("/api/status", s.handleStatus)
+	s.routesOnce.Do(func() {
+		s.router.HandleFunc("/api/register", s.handleRegister)
+		s.router.HandleFunc("/api/tunnel", s.handleTunnel)
+		s.router.HandleFunc("/api/ws", s.handleWebSocket)
+		s.router.HandleFunc("/api/status", s.handleStatus)
 
-	// Mount admin panel if enabled
-	if s.config.Admin.Enabled {
-		adminHandler, err := admin.NewHandler(&s.config.Admin, s.config, s)
-		if err != nil {
-			s.log.WithError(err).Error("Failed to initialize admin panel")
-		} else {
-			adminHandler.RegisterRoutes(s.router)
-			s.log.Infof("Admin panel enabled at %s", s.config.Admin.PathPrefix)
+		// Mount admin panel if enabled
+		if s.config.Admin.Enabled {
+			adminHandler, err := admin.NewHandler(&s.config.Admin, s.config, s)
+			if err != nil {
+				s.log.WithError(err).Error("Failed to initialize admin panel")
+			} else {
+				adminHandler.RegisterRoutes(s.router)
+				s.log.Infof("Admin panel enabled at %s", s.config.Admin.PathPrefix)
+			}
 		}
-	}
 
-	s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
+		s.router.PathPrefix("/").Handler(http.HandlerFunc(s.handleTunnelRequest))
+	})
 }
 
 // RegistrationRequest represents a client registration request
@@ -1309,8 +1314,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// Collect status information
 	status := map[string]interface{}{
 		"version": "1.0.0",                         // Replace with actual version
-		"uptime":  time.Since(time.Now()).String(), // Just a placeholder - real impl would use server start time
-		"tunnels": len(s.tunnels.tunnels),
+		"uptime":  time.Since(s.startTime).String(),
+		"tunnels": func() int { s.tunnels.mu.RLock(); defer s.tunnels.mu.RUnlock(); return len(s.tunnels.tunnels) }(),
 	}
 
 	// Add features information

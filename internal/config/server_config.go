@@ -47,7 +47,7 @@ type TunnelLimitsConfig struct {
 type AdminConfig struct {
 	Enabled    bool
 	PathPrefix string
-	AuthMethod string // "oauth", "basic", or "none"
+	AuthMethod string // "basic" or "none"
 	Username   string // For basic auth
 	Password   string // For basic auth
 }
@@ -521,6 +521,13 @@ func SaveServerConfig(config *ServerConfig, filePath string) error {
 
 	// Load DNS credentials
 	viper.Set("letsencrypt.dns.credentials", config.LetsEncrypt.DNSCredentials)
+
+	// Admin panel settings
+	viper.Set("admin.enabled", config.Admin.Enabled)
+	viper.Set("admin.path_prefix", config.Admin.PathPrefix)
+	viper.Set("admin.auth_method", config.Admin.AuthMethod)
+	viper.Set("admin.username", config.Admin.Username)
+	viper.Set("admin.password", config.Admin.Password)
 
 	// If no file path provided, use default
 	if filePath == "" {
